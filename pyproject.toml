@@ -1,0 +1,52 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "toklab"
+version = "0.1.0"
+description = "Research workbench for structure-aware and domain-adapted code tokenization"
+readme = "AGENTS.md"
+requires-python = ">=3.11"
+dependencies = [
+    "typer>=0.12",
+    "transformers>=4.40",
+    "tokenizers>=0.19",
+    "tree-sitter>=0.22",
+    "tree-sitter-python>=0.21",
+    "libcst>=1.4",
+    "datasketch>=1.6",
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "pandas>=2.1",
+    "pyarrow>=14",
+    "jinja2>=3.1",
+]
+
+[project.optional-dependencies]
+models = [
+    "torch>=2.1",
+]
+dev = [
+    "pytest>=8.0",
+    "hypothesis>=6.100",
+    "ruff>=0.4",
+]
+
+[project.scripts]
+toklab = "toklab.cli:app"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 88
+src = ["src", "tests", "scripts"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
