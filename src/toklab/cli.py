@@ -9,7 +9,9 @@ from toklab import __version__
 
 app = typer.Typer(help="TokLab research workbench")
 data_app = typer.Typer(help="Dataset ingestion and splits")
+run_app = typer.Typer(help="Experiment runners")
 app.add_typer(data_app, name="data")
+app.add_typer(run_app, name="run")
 
 
 @app.callback()
@@ -45,6 +47,50 @@ def data_build(
     typer.echo(split_counts_message(counts))
     typer.echo(f"manifest={(out / 'manifest.parquet').resolve()}")
     typer.echo(f"manifest_hash={(out / 'manifest_hash').resolve()}")
+
+
+@run_app.command("baselines")
+def run_baselines_cmd(
+    manifest: Annotated[
+        Path,
+        typer.Option("--manifest", help="Path to manifest.parquet"),
+    ],
+    out: Annotated[
+        Path,
+        typer.Option("--out", help="Output directory for metrics"),
+    ],
+    repos: Annotated[
+        Path,
+        typer.Option(
+            "--repos",
+            help="Directory of repo checkouts (needed to read source text)",
+        ),
+    ],
+    split: Annotated[
+        str,
+        typer.Option("--split", help="Manifest split to evaluate"),
+    ] = "test",
+    seed: Annotated[
+        int,
+        typer.Option("--seed", help="Bootstrap RNG seed"),
+    ] = 0,
+    n_boot: Annotated[
+        int,
+        typer.Option("--n-boot", help="Bootstrap replicates"),
+    ] = 1000,
+) -> None:
+    """Run baseline tokenizers C1, C2, C6; print mean tokens/KB with CI."""
+    from toklab.evaluation.baselines import run_baselines
+
+    table, _fid, _cis = run_baselines(
+        manifest=manifest,
+        repos_dir=repos,
+        out_dir=out,
+        split=split,
+        seed=seed,
+        n_boot=n_boot,
+    )
+    typer.echo(table)
 
 
 if __name__ == "__main__":

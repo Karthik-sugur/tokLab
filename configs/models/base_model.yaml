@@ -1,0 +1,4 @@
+# Base code LM used for condition C2 (and later C3–C5).
+# Confirmed loadable in spike_1 (Qwen/Qwen2.5-Coder-0.5B).
+model_name: Qwen/Qwen2.5-Coder-0.5B
+tokenizer_name: Qwen/Qwen2.5-Coder-0.5B
