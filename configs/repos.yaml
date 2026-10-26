@@ -1,0 +1,29 @@
+# Placeholder repository pins for TokLab data collection.
+# Fill url / commit_sha / license before running scripts/fetch_repos.py.
+# Do not invent commit SHAs.
+
+repos:
+  - name: placeholder-alpha
+    url: https://github.com/TODO/placeholder-alpha.git
+    commit_sha: TODO
+    license: TODO
+
+  - name: placeholder-beta
+    url: https://github.com/TODO/placeholder-beta.git
+    commit_sha: TODO
+    license: TODO
+
+  - name: placeholder-gamma
+    url: https://github.com/TODO/placeholder-gamma.git
+    commit_sha: TODO
+    license: TODO
+
+  - name: placeholder-delta
+    url: https://github.com/TODO/placeholder-delta.git
+    commit_sha: TODO
+    license: TODO
+
+  - name: placeholder-epsilon
+    url: https://github.com/TODO/placeholder-epsilon.git
+    commit_sha: TODO
+    license: TODO

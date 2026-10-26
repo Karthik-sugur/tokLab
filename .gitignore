@@ -3,9 +3,9 @@
 venv/
 env/
 
-# TokLab data and experiment outputs
-data/
-runs/
+# TokLab dataset checkouts and experiment outputs (repo root only)
+/data/
+/runs/
 
 # Python
 __pycache__/
