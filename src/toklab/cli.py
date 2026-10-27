@@ -49,6 +49,45 @@ def data_build(
     typer.echo(f"manifest_hash={(out / 'manifest_hash').resolve()}")
 
 
+@data_app.command("synth")
+def data_synth(
+    manifest: Annotated[
+        Path,
+        typer.Option("--manifest", help="Path to manifest.parquet"),
+    ],
+    out: Annotated[
+        Path,
+        typer.Option("--out", help="Output directory for synth artifacts"),
+    ],
+    repos: Annotated[
+        Path,
+        typer.Option(
+            "--repos",
+            help="Directory of repo checkouts (needed to read source text)",
+        ),
+    ],
+    seed: Annotated[
+        int,
+        typer.Option("--seed", help="RNG seed for lexicon and drift"),
+    ] = 0,
+) -> None:
+    """Apply enterprise rename (adapt) and drift variants (drift_holdout)."""
+    from toklab.data.synth import run_synth
+
+    summary = run_synth(
+        manifest=manifest,
+        repos_dir=repos,
+        out_dir=out,
+        seed=seed,
+    )
+    typer.echo(
+        "synth "
+        f"adapt_files={summary['adapt_files']} "
+        f"drift_holdout_files={summary['drift_holdout_files']} "
+        f"seed={summary['seed']}"
+    )
+
+
 @run_app.command("baselines")
 def run_baselines_cmd(
     manifest: Annotated[

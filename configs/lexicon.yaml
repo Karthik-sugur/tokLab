@@ -1,0 +1,92 @@
+# Enterprise-style identifier parts for <Org><Domain><Entity><Role>.
+# lexicon.py partitions each list into disjoint adapt / drift pools (seeded).
+# Do not put the same word in multiple categories if you care about
+# cross-category uniqueness; adapt/drift disjointness is enforced in code.
+
+orgs:
+  - Acme
+  - Globex
+  - Initech
+  - Umbrella
+  - Stark
+  - Wayne
+  - Oscorp
+  - Soylent
+  - Hooli
+  - PiedPiper
+  - MassiveDynamic
+  - Cyberdyne
+  - Tyrell
+  - Weyland
+  - Nakatomi
+  - Aperture
+  - BlackMesa
+  - LexCorp
+  - Wonka
+  - Monarch
+
+domains:
+  - Logistics
+  - Payment
+  - Billing
+  - Inventory
+  - Shipping
+  - Payroll
+  - Compliance
+  - Procurement
+  - Fulfillment
+  - Settlement
+  - Ledger
+  - Catalog
+  - Reservation
+  - Underwriting
+  - Clearing
+  - Telemetry
+  - Orchestration
+  - Provisioning
+  - Authentication
+  - Reconciliation
+
+entities:
+  - Shipment
+  - Invoice
+  - Order
+  - Customer
+  - Vendor
+  - Batch
+  - Transaction
+  - Account
+  - Contract
+  - Manifest
+  - Workflow
+  - Ticket
+  - Policy
+  - Claim
+  - Asset
+  - Schedule
+  - Portfolio
+  - Subscription
+  - Document
+  - Session
+
+roles:
+  - Router
+  - Processor
+  - Service
+  - Manager
+  - Handler
+  - Controller
+  - Builder
+  - Validator
+  - Scheduler
+  - Aggregator
+  - Coordinator
+  - Dispatcher
+  - Repository
+  - Factory
+  - Gateway
+  - Adapter
+  - Monitor
+  - Analyzer
+  - Executor
+  - Registrar
