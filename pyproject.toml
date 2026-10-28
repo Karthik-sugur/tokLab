@@ -28,6 +28,7 @@ dependencies = [
 [project.optional-dependencies]
 models = [
     "torch>=2.1",
+    "peft>=0.10",
 ]
 dev = [
     "pytest>=8.0",

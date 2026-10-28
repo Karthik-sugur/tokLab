@@ -195,6 +195,28 @@ def run_experiment_cmd(
         typer.echo(f"report={status['report_path']}")
 
 
+@run_app.command("finetune-dry")
+def run_finetune_dry_cmd(
+    out: Annotated[
+        Path,
+        typer.Option("--out", help="Directory for dry-run logs"),
+    ] = Path("runs/finetune_dry_tiny"),
+    seed: Annotated[int, typer.Option("--seed")] = 0,
+) -> None:
+    """Dry-run C2..C5 fine-tune plan on the tiny fixture (no real training)."""
+    from toklab.models.finetune import dry_run_demo
+
+    logs = dry_run_demo(run_dir=out, seed=seed)
+    typer.echo(f"out={out.resolve()}")
+    typer.echo(f"n_logs={len(logs)}")
+    for log in logs:
+        typer.echo(
+            f"  {log.condition} seed={log.seed} dry_run={log.dry_run} "
+            f"steps_executed={log.steps_executed} "
+            f"n_train_bytes={log.n_train_bytes}"
+        )
+
+
 @app.command("report")
 def report_cmd(
     run: Annotated[
