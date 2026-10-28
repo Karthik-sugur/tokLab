@@ -1,0 +1,35 @@
+# Pre-registered hypotheses for the C2–C5 2x2 (structure × domain vocab).
+# Written BEFORE looking at factorial results. No numeric targets.
+
+decision_rule: >
+  Combined beats either alone on a metric only if C5 beats the better of
+  C3/C4 with a CI excluding zero.
+
+hypotheses:
+  H1:
+    claim: >
+      Structure alone (C4) reduces tokens relative to the code tokenizer (C2).
+    contrast: C4 vs C2
+  H2:
+    claim: >
+      Domain-adapted vocabulary alone (C3) reduces tokens relative to C2.
+    contrast: C3 vs C2
+  H3:
+    claim: >
+      Combined (C5) reduces tokens relative to C2.
+    contrast: C5 vs C2
+  H4:
+    claim: >
+      Combined beats the better of structure-alone or domain-alone
+      (decision_rule).
+    contrast: C5 vs max(C3, C4)
+  H5:
+    claim: >
+      The structure×domain interaction is non-zero (super-/sub-additivity
+      vs independence expectation 1-(1-r_S)(1-r_D) for token reduction).
+    contrast: interaction I
+
+notes:
+  - Metric for intrinsic factorial is tokens_per_kb (lower is better).
+  - Vocabulary is mined from the adapt split only (no test leakage).
+  - Quality / BPB is out of scope for this factorial table.

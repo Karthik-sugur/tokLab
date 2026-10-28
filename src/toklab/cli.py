@@ -88,6 +88,55 @@ def data_synth(
     )
 
 
+@run_app.command("factorial")
+def run_factorial_cmd(
+    manifest: Annotated[
+        Path,
+        typer.Option("--manifest", help="Path to manifest.parquet"),
+    ],
+    repos: Annotated[
+        Path,
+        typer.Option(
+            "--repos",
+            help="Directory of repo checkouts (needed to read source text)",
+        ),
+    ],
+    k: Annotated[
+        str,
+        typer.Option("--k", help="Comma-separated K values, e.g. 0,128,512,2048"),
+    ] = "0,128,512,2048",
+    split: Annotated[
+        str,
+        typer.Option("--split", help="Eval split (vocab always from adapt)"),
+    ] = "test",
+    seed: Annotated[
+        int,
+        typer.Option("--seed", help="Bootstrap RNG seed"),
+    ] = 0,
+    n_boot: Annotated[
+        int,
+        typer.Option("--n-boot", help="Bootstrap replicates"),
+    ] = 200,
+) -> None:
+    """2x2 factorial over C2–C5 for a K sweep; print effects table."""
+    from toklab.evaluation.factorial import run_factorial
+
+    k_values = [int(x.strip()) for x in k.split(",") if x.strip()]
+    table, _effects = run_factorial(
+        manifest=manifest,
+        repos_dir=repos,
+        k_values=k_values,
+        split=split,
+        seed=seed,
+        n_boot=n_boot,
+    )
+    typer.echo(table)
+    typer.echo(
+        "NOTE: results above are from the provided manifest/repos "
+        "(fixtures if you used test fixtures)."
+    )
+
+
 @run_app.command("compare")
 def run_compare_cmd(
     conditions: Annotated[
