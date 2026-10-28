@@ -177,6 +177,49 @@ def run_compare_cmd(
     typer.echo(table)
 
 
+@run_app.command("experiment")
+def run_experiment_cmd(
+    config: Annotated[
+        Path,
+        typer.Option("--config", help="Experiment YAML path"),
+    ],
+) -> None:
+    """Run a full experiment from YAML; write runs/<config_hash>/."""
+    from toklab.experiments.runner import run_experiment
+
+    status = run_experiment(config)
+    typer.echo(f"config_hash={status['config_hash']}")
+    typer.echo(f"run_dir={status.get('run_dir')}")
+    typer.echo(f"state={status.get('state')}")
+    if status.get("report_path"):
+        typer.echo(f"report={status['report_path']}")
+
+
+@app.command("report")
+def report_cmd(
+    run: Annotated[
+        str,
+        typer.Option("--run", help="Config hash (directory under runs/)"),
+    ],
+    runs_root: Annotated[
+        Path,
+        typer.Option("--runs-root", help="Runs root directory"),
+    ] = Path("runs"),
+    hypotheses: Annotated[
+        Path,
+        typer.Option("--hypotheses", help="hypotheses.yaml path"),
+    ] = Path("configs/hypotheses.yaml"),
+) -> None:
+    """Re-render Markdown report for an existing run hash."""
+    from toklab.evaluation.report import render_report
+
+    run_dir = runs_root / run
+    if not run_dir.is_dir():
+        raise typer.BadParameter(f"run directory not found: {run_dir}")
+    path = render_report(run_dir=run_dir, hypotheses_path=hypotheses)
+    typer.echo(f"report={path.resolve()}")
+
+
 @run_app.command("baselines")
 def run_baselines_cmd(
     manifest: Annotated[

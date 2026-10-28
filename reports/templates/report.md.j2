@@ -1,0 +1,123 @@
+# TokLab report: {{ name }}
+
+**config_hash:** `{{ config_hash }}`  
+**run_dir:** `{{ run_dir }}`
+
+{% if any_invalid %}
+> **INVALID:** condition(s) {{ invalid_conditions | join(", ") }} failed
+> fidelity (lossless round-trip). They are marked INVALID and **excluded
+> from hypothesis claims**.
+{% endif %}
+
+## Setup
+
+| Field | Value |
+|-------|-------|
+| seed | {{ env.seed }} |
+| git_sha | {{ env.git_sha }} |
+| python | {{ env.python_version }} |
+| platform | {{ env.platform }} |
+| cpu | {{ env.cpu }} |
+| gpu | {{ env.gpu }} |
+| manifest_hash | `{{ env.manifest_hash }}` |
+| vocab_hash | `{{ env.vocab_hash }}` |
+| model | {{ config.get("model", {}).get("model_name", "n/a") }} |
+
+Library versions: {% for k, v in (env.library_versions or {}).items() %}{{ k }}={{ v }}{% if not loop.last %}, {% endif %}{% endfor %}
+
+## Fidelity
+
+
+| condition | n_files | roundtrip_ok | roundtrip_fail | status |
+|-----------|---------|--------------|----------------|--------|
+{% for r in fidelity %}
+| {{ r.condition }} | {{ r.n_files }} | {{ r.n_roundtrip_ok }} | {{ r.n_roundtrip_fail }} | **{{ r.status }}** |
+{% else %}
+| — | — | — | — | not run |
+{% endfor %}
+
+## Token efficiency (tokens/KB, lower is better)
+
+Cluster-bootstrap mean with CI. Rows for INVALID conditions are listed but
+excluded from claims.
+
+| condition | mean | CI low | CI high | n_repos | notes |
+|-----------|------|--------|---------|---------|-------|
+{% for r in efficiency %}
+| {{ r.condition }} | {{ "%.4f"|format(r.estimate) }} | {{ "%.4f"|format(r.ci_low) }} | {{ "%.4f"|format(r.ci_high) }} | {{ r.n_repos }} | {% if r.excluded %}EXCLUDED (INVALID){% else %}—{% endif %} |
+{% else %}
+| — | — | — | — | — | not run |
+{% endfor %}
+
+## 2×2 interaction (structure × domain)
+
+Decision rule: {{ decision_rule }}
+
+{% if interaction_note %}
+**Interaction summary:** {{ interaction_note }}
+{% endif %}
+
+| k | C2 | C3 | C4 | C5 | effect_S | effect_D | I | I CI | C5>best |
+|---|----|----|----|----|----------|----------|---|------|---------|
+{% for e in effects %}
+| {{ e.k }} | {{ "%.2f"|format(e.c2) }} | {{ "%.2f"|format(e.c3) }} | {{ "%.2f"|format(e.c4) }} | {{ "%.2f"|format(e.c5) }} | {{ "%.2f"|format(e.effect_s) }} | {{ "%.2f"|format(e.effect_d) }} | {{ "%.4f"|format(e.interaction) }} | [{{ "%.3f"|format(e.interaction_low) }}, {{ "%.3f"|format(e.interaction_high) }}] | {{ e.combined_beats_either }} |
+{% else %}
+| — | not run | | | | | | | | |
+{% endfor %}
+
+## Context utilisation
+
+Greedy first-fit packing in fixed `file_id` order.
+
+| condition | budget | files_fit | bytes_fit | tokens_used |
+|-----------|--------|-----------|-----------|-------------|
+{% for r in context %}
+| {{ r.condition }} | {{ r.budget_tokens }} | {{ r.files_fit }} | {{ r.bytes_fit }} | {{ r.tokens_used }} |
+{% else %}
+| — | — | — | — | not run |
+{% endfor %}
+
+## Systems cost
+
+{% if systems %}
+| condition | seq_len | device | dtype | median_ms | IQR_ms | peak_mem | ms/src_KB | quality_valid | notes |
+|-----------|---------|--------|-------|-----------|--------|----------|-----------|---------------|-------|
+{% for r in systems %}
+| {{ r.condition }} | {{ r.seq_len }} | {{ r.device }} | {{ r.dtype }} | {{ "%.3f"|format(r.latency_ms_median) }} | {{ "%.3f"|format(r.latency_ms_iqr) }} | {{ r.peak_memory_bytes }} | {{ "%.4f"|format(r.time_per_source_kb_ms) }} | {{ r.quality_valid }} | {{ r.notes }} |
+{% endfor %}
+{% else %}
+Systems stage not run (disabled or skipped).
+{% endif %}
+
+## Vocab overhead (ESTIMATE)
+
+All figures below are labelled **ESTIMATE** (not measured hardware counters).
+
+| seq_len | delta_V | delta_params | delta_bytes | kv_cache_bytes | flops/token |
+|---------|---------|--------------|-------------|----------------|-------------|
+{% for r in vocab_cost %}
+| {{ r.seq_len }} | {{ r.delta_v }} | {{ r.vocab_delta_params }} | {{ r.vocab_delta_bytes }} | {{ r.kv_kv_cache_bytes }} | {{ "%.3e"|format(r.flops_flops_per_token_estimate) }} |
+{% else %}
+| — | — | — | — | — | not run |
+{% endfor %}
+
+## Hypotheses verdicts
+
+{% for h in hypotheses %}
+### {{ h.id }} — {{ h.verdict }}
+
+{{ h.claim }}
+
+- contrast: {{ h.contrast }}
+- verdict: **{{ h.verdict }}**
+- reason: {{ h.reason }}
+
+{% else %}
+No hypotheses evaluated.
+{% endfor %}
+
+## Limitations
+
+{% for item in limitations %}
+- {{ item }}
+{% endfor %}

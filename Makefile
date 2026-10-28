@@ -7,4 +7,5 @@ lint:
 	ruff check .
 
 mvp:
-	@echo "not yet"
+	python scripts/build_mvp_fixtures.py
+	toklab run experiment --config configs/experiments/mvp_py.yaml

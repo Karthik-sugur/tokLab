@@ -100,3 +100,61 @@ def write_metrics_parquet(df: pd.DataFrame, path: Path | str) -> None:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     df.to_parquet(path, index=False)
+
+
+def context_utilisation(
+    files: Sequence[tuple[str, int, int]],
+    budgets: Sequence[int],
+) -> pd.DataFrame:
+    """Greedy first-fit packing of files into token budgets.
+
+    ``files`` is an ordered sequence of ``(file_id, n_tokens, n_bytes)``.
+    For each budget ``C``, walk files in that fixed order and include a file
+    when ``used + n_tokens <= C`` (skip if it does not fit; continue).
+
+    Returns rows: budget, files_fit, bytes_fit, tokens_used.
+    """
+    rows: list[dict[str, object]] = []
+    ordered = list(files)
+    for c in budgets:
+        used = 0
+        n_files = 0
+        n_bytes = 0
+        for _fid, n_tok, nbytes in ordered:
+            if n_tok < 0:
+                raise ValueError("n_tokens must be non-negative")
+            if used + n_tok <= c:
+                used += n_tok
+                n_files += 1
+                n_bytes += nbytes
+        rows.append(
+            {
+                "budget_tokens": int(c),
+                "files_fit": n_files,
+                "bytes_fit": n_bytes,
+                "tokens_used": used,
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def context_utilisation_for_tokenizer(
+    tokenizer: Tokenizer,
+    source_files: Sequence[SourceFile],
+    texts: dict[str, str],
+    budgets: Sequence[int],
+    *,
+    condition: str | None = None,
+) -> pd.DataFrame:
+    """Compute context utilisation using a fixed file order (sorted file_id)."""
+    ordered_sf = sorted(source_files, key=lambda f: f.file_id)
+    packed: list[tuple[str, int, int]] = []
+    for sf in ordered_sf:
+        text = texts[sf.file_id]
+        n_tok = len(tokenizer.encode(text).ids)
+        n_bytes = original_n_bytes(text)
+        packed.append((sf.file_id, n_tok, n_bytes))
+    df = context_utilisation(packed, budgets)
+    cond = condition if condition is not None else tokenizer.name
+    df.insert(0, "condition", cond)
+    return df
