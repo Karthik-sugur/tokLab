@@ -23,10 +23,8 @@
 | vocab_hash | `{{ env.vocab_hash }}` |
 | model | {{ config.get("model", {}).get("model_name", "n/a") }} |
 
-Library versions: {% for k, v in (env.library_versions or {}).items() %}{{ k }}={{ v }}{% if not loop.last %}, {% endif %}{% endfor %}
-
+Library versions: {% for k, v in (env.library_versions or {}).items() %}{{ k }}={{ v }}{% if not loop.last %}, {% endif %}{% endfor %}{{ "\n" }}
 ## Fidelity
-
 
 | condition | n_files | roundtrip_ok | roundtrip_fail | status |
 |-----------|---------|--------------|----------------|--------|
