@@ -88,6 +88,46 @@ def data_synth(
     )
 
 
+@run_app.command("compare")
+def run_compare_cmd(
+    conditions: Annotated[
+        str,
+        typer.Option(
+            "--conditions",
+            help="Comma-separated condition ids, e.g. C2,C4",
+        ),
+    ],
+    manifest: Annotated[
+        Path,
+        typer.Option("--manifest", help="Path to manifest.parquet"),
+    ],
+    repos: Annotated[
+        Path,
+        typer.Option(
+            "--repos",
+            help="Directory of repo checkouts (needed to read source text)",
+        ),
+    ],
+    split: Annotated[
+        str,
+        typer.Option("--split", help="Manifest split to evaluate"),
+    ] = "test",
+) -> None:
+    """Print token-count comparison across conditions (no direction asserted)."""
+    from toklab.evaluation.compare import compare_conditions
+
+    conds = [c.strip() for c in conditions.split(",") if c.strip()]
+    if not conds:
+        raise typer.BadParameter("provide at least one condition")
+    table = compare_conditions(
+        manifest=manifest,
+        repos_dir=repos,
+        conditions=conds,
+        split=split,
+    )
+    typer.echo(table)
+
+
 @run_app.command("baselines")
 def run_baselines_cmd(
     manifest: Annotated[

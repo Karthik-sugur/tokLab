@@ -1,4 +1,4 @@
-"""Condition → Tokenizer factory for baseline (and later) conditions."""
+"""Condition → Tokenizer factory."""
 
 from __future__ import annotations
 
@@ -6,9 +6,12 @@ from pathlib import Path
 from typing import Any
 
 from toklab.tokenizers.byte_level import ByteLevelTokenizer
+from toklab.tokenizers.composed import ComposedTokenizer
 from toklab.tokenizers.native_hf import NativeHFTokenizer
 
 BASELINE_CONDITIONS = ("C1", "C2", "C6")
+STRUCTURE_CONDITIONS = ("C4",)
+KNOWN_CONDITIONS = BASELINE_CONDITIONS + STRUCTURE_CONDITIONS
 
 
 def _default_base_model_yaml() -> Path:
@@ -37,10 +40,11 @@ def load_base_model_config(path: Path | str | None = None) -> dict[str, Any]:
 
 
 def get_tokenizer(condition: str, cfg: dict[str, Any] | None = None) -> Any:
-    """Return a Tokenizer for ``condition`` (``C1`` / ``C2`` / ``C6``).
+    """Return a Tokenizer for ``condition`` (``C1`` / ``C2`` / ``C4`` / ``C6``).
 
-    ``cfg`` may include ``model_name`` / ``tokenizer_name`` (for C2) or
-    ``base_model_yaml`` pointing at a YAML file with those keys.
+    ``cfg`` may include ``model_name`` / ``tokenizer_name``,
+    ``attach_leading_space`` (C4, default True per decision 002),
+    ``indent_tokens`` (C4 ablation, default False).
     """
     cfg = dict(cfg or {})
     if "model_name" not in cfg:
@@ -55,9 +59,23 @@ def get_tokenizer(condition: str, cfg: dict[str, Any] | None = None) -> Any:
         return NativeHFTokenizer.from_pretrained(str(model_id), name="C2")
     if condition == "C6":
         return ByteLevelTokenizer()
+    if condition == "C4":
+        from toklab.parsing.segmenters import TreeSitterSegmenter
+
+        model_id = cfg.get("tokenizer_name") or cfg["model_name"]
+        base = NativeHFTokenizer.from_pretrained(str(model_id), name="C2")
+        attach = cfg.get("attach_leading_space", True)
+        indent = bool(cfg.get("indent_tokens", False))
+        return ComposedTokenizer(
+            TreeSitterSegmenter(),
+            base,
+            adapted_vocab=None,
+            attach_leading_space=bool(attach),
+            indent_tokens=indent,
+            name="C4",
+        )
     raise ValueError(
-        f"unknown condition {condition!r}; "
-        f"baselines support {BASELINE_CONDITIONS}"
+        f"unknown condition {condition!r}; known: {KNOWN_CONDITIONS}"
     )
 
 
