@@ -99,6 +99,20 @@ All figures below are labelled **ESTIMATE** (not measured hardware counters).
 | — | — | — | — | — | not run |
 {% endfor %}
 
+## Vocabulary drift
+
+Proportions ``p ∈ {0, 10, 25, 50}``. Baselines C2/C4; STATIC = frozen adapt
+vocab; REFRESH = append-only new entries from a small drifted v1 sample
+(old ids unchanged). BPB only for gate-valid fine-tuned variants.
+
+| p | variant | baseline | n_tok | n_base | reduction | coverage | bpb | \|V\| |
+|---|---------|----------|-------|--------|-----------|----------|-----|------|
+{% for r in drift %}
+| {{ r.proportion }} | {{ r.variant }} | {{ r.baseline }} | {{ r.n_tokens }} | {{ r.n_tokens_baseline }} | {{ "%.3f"|format(r.token_reduction) if r.token_reduction == r.token_reduction else "nan" }} | {{ "%.3f"|format(r.coverage) if r.coverage == r.coverage else "nan" }} | {% if r.bpb is none %}{{ r.bpb_status }}{% else %}{{ "%.4f"|format(r.bpb) }}{% endif %} | {{ r.n_vocab }} |
+{% else %}
+| — | not run | | | | | | | |
+{% endfor %}
+
 ## Hypotheses verdicts
 
 {% for h in hypotheses %}

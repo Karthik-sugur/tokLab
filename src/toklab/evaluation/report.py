@@ -209,6 +209,7 @@ def build_report_context(
     context = _read_parquet(run_dir, "context_utilisation.parquet")
     systems = _read_parquet(run_dir, "systems.parquet")
     vocab_cost = _read_parquet(run_dir, "vocab_cost.parquet")
+    drift = _read_parquet(run_dir, "drift_metrics.parquet")
 
     invalid: set[str] = set()
     fidelity_rows: list[dict[str, Any]] = []
@@ -288,6 +289,7 @@ def build_report_context(
         "context": _df_records(context),
         "systems": _df_records(systems),
         "vocab_cost": _df_records(vocab_cost),
+        "drift": _df_records(drift),
         "hypotheses": verdicts,
         "decision_rule": str(hypo.get("decision_rule", "")).strip(),
         "limitations": [
@@ -295,6 +297,10 @@ def build_report_context(
             "Quality / BPB suppressed for conditions with untrained new vocab rows "
             "(C3/C5): systems rows tagged quality_valid=False when present.",
             "FLOPs / KV / param overhead figures are ESTIMATE labels, not measured.",
+            "Drift REFRESH may append tokens mined from a small drifted v1 sample; "
+            "old adapted ids stay unchanged (append-only).",
+            "Drift BPB is reported only for gate-valid fine-tuned variants; "
+            "otherwise marked not run.",
             "Fixture-scale corpora: do not generalise beyond the evaluated repos.",
             (
                 "Conditions failing fidelity are marked INVALID and excluded "

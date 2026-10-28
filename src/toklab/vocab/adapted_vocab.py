@@ -100,6 +100,48 @@ class AdaptedVocab:
     def __contains__(self, token: str) -> bool:
         return token in self._token_to_id
 
+    def token_to_id_snapshot(self) -> dict[str, int]:
+        """Copy of token→id (for asserting refresh preserves old ids)."""
+        return dict(self._token_to_id)
+
+    def extend_append_only(
+        self,
+        selected: list[Any],
+        *,
+        skip_existing: bool = True,
+    ) -> AdaptedVocab:
+        """Return a new vocab with ``selected`` appended after current max id.
+
+        Existing token→id bindings are copied unchanged (append-only).
+        Tokens already present are skipped when ``skip_existing`` is True.
+        """
+        next_id = (
+            max((e.id for e in self._entries), default=self.id_offset - 1) + 1
+        )
+        new_entries = list(self._entries)
+        for s in selected:
+            tok = s.token
+            if skip_existing and tok in self._token_to_id:
+                continue
+            if any(e.token == tok for e in new_entries):
+                continue
+            new_entries.append(
+                AdaptedEntry(
+                    token=tok,
+                    id=next_id,
+                    gain=float(s.gain),
+                    freq=int(s.freq),
+                    n_repos=int(s.n_repos),
+                )
+            )
+            next_id += 1
+        return AdaptedVocab(
+            id_offset=self.id_offset,
+            entries=new_entries,
+            mode=self.mode,
+            base_model=self.base_model,
+        )
+
     def content_hash(self) -> str:
         payload = {
             "id_offset": self.id_offset,

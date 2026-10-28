@@ -195,6 +195,43 @@ def run_experiment_cmd(
         typer.echo(f"report={status['report_path']}")
 
 
+@run_app.command("drift")
+def run_drift_cmd(
+    run: Annotated[
+        str,
+        typer.Option("--run", help="Experiment config hash under runs/"),
+    ],
+    runs_root: Annotated[
+        Path,
+        typer.Option("--runs-root", help="Runs root directory"),
+    ] = Path("runs"),
+    k_refresh: Annotated[
+        int,
+        typer.Option("--k-refresh", help="Max new append-only refresh tokens"),
+    ] = 4,
+    v1_sample_size: Annotated[
+        int,
+        typer.Option(
+            "--v1-sample-size",
+            help="How many drifted holdout files to mine for refresh",
+        ),
+    ] = 1,
+) -> None:
+    """Vocabulary drift sweep for an existing experiment run."""
+    from toklab.evaluation.drift import run_drift_for_experiment_hash
+
+    table, run_dir = run_drift_for_experiment_hash(
+        run,
+        runs_root=runs_root,
+        k_refresh=k_refresh,
+        v1_sample_size=v1_sample_size,
+    )
+    typer.echo(table)
+    typer.echo(f"run_dir={run_dir.resolve()}")
+    typer.echo(f"drift_table={(run_dir / 'drift_table.txt').resolve()}")
+    typer.echo(f"report={(run_dir / 'report.md').resolve()}")
+
+
 @run_app.command("finetune-dry")
 def run_finetune_dry_cmd(
     out: Annotated[
