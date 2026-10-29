@@ -144,5 +144,71 @@ class RunStore:
             return None
         return dict(row)
 
+    def list_runs(self) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM runs ORDER BY updated_at DESC"
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def read_json(self, config_hash: str, name: str) -> dict[str, Any] | None:
+        path = self.run_dir(config_hash) / name
+        if not path.is_file():
+            return None
+        return json.loads(path.read_text(encoding="utf-8"))
+
+    def read_text(self, config_hash: str, name: str) -> str | None:
+        path = self.run_dir(config_hash) / name
+        if not path.is_file():
+            return None
+        return path.read_text(encoding="utf-8")
+
+    def artifact_exists(self, config_hash: str, name: str) -> bool:
+        return (self.run_dir(config_hash) / name).is_file()
+
+    def try_read_parquet(
+        self, config_hash: str, name: str
+    ) -> pd.DataFrame | None:
+        path = self.run_dir(config_hash) / name
+        if not path.is_file():
+            return None
+        return pd.read_parquet(path)
+
     def write_status(self, config_hash: str, status: dict[str, Any]) -> Path:
         return self.write_json(config_hash, "status.json", status)
+
+    def load_status(self, config_hash: str) -> dict[str, Any] | None:
+        return self.read_json(config_hash, "status.json")
+
+
+def list_prepared_datasets(datasets_root: Path | str) -> list[dict[str, Any]]:
+    """List directories that contain ``manifest.parquet`` (prepared datasets)."""
+    root = Path(datasets_root)
+    if not root.is_dir():
+        return []
+    out: list[dict[str, Any]] = []
+    # Direct children and one-level nested (e.g. tests/fixtures/mvp/manifest).
+    candidates: list[Path] = []
+    for path in sorted(root.rglob("manifest.parquet")):
+        candidates.append(path.parent)
+    seen: set[str] = set()
+    for man_dir in candidates:
+        key = str(man_dir.resolve())
+        if key in seen:
+            continue
+        seen.add(key)
+        hash_path = man_dir / "manifest_hash"
+        digest = (
+            hash_path.read_text(encoding="utf-8").strip()
+            if hash_path.is_file()
+            else None
+        )
+        out.append(
+            {
+                "id": man_dir.name,
+                "path": str(man_dir.resolve()),
+                "manifest_path": str((man_dir / "manifest.parquet").resolve()),
+                "manifest_hash": digest,
+            }
+        )
+    return out

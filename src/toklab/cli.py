@@ -25,6 +25,48 @@ def version_cmd() -> None:
     typer.echo(__version__)
 
 
+@app.command("serve-api")
+def serve_api_cmd(
+    host: Annotated[str, typer.Option("--host")] = "127.0.0.1",
+    port: Annotated[int, typer.Option("--port")] = 8000,
+    runs_root: Annotated[Path, typer.Option("--runs-root")] = Path("runs"),
+    datasets_root: Annotated[
+        Path, typer.Option("--datasets-root")
+    ] = Path("tests/fixtures"),
+) -> None:
+    """Start the FastAPI server (uvicorn)."""
+    import uvicorn
+
+    from toklab.api.app import create_app
+
+    api = create_app(runs_root=runs_root, datasets_root=datasets_root)
+    uvicorn.run(api, host=host, port=port)
+
+
+@app.command("serve-ui")
+def serve_ui_cmd(
+    port: Annotated[int, typer.Option("--port")] = 8501,
+) -> None:
+    """Start the Streamlit UI (display-only; talks to the API)."""
+    import subprocess
+    import sys
+    from pathlib import Path as P
+
+    # src/toklab/cli.py → parents[2] is the repository root.
+    ui_app = P(__file__).resolve().parents[2] / "ui" / "app.py"
+    cmd = [
+        sys.executable,
+        "-m",
+        "streamlit",
+        "run",
+        str(ui_app),
+        "--server.port",
+        str(port),
+    ]
+    typer.echo(" ".join(cmd))
+    raise SystemExit(subprocess.call(cmd))
+
+
 @data_app.command("build")
 def data_build(
     repos: Annotated[
