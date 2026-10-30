@@ -1,0 +1,24 @@
+# Ingestion filters for toklab.data.ingest.
+# Relative paths under each repo are checked against these lists.
+# Directory names: skip a file if any path segment matches (exact).
+# File names: skip a file if its basename matches (exact).
+
+# Legacy tooling / packaging dirs (always skipped).
+# Example/docs/vendored-ish trees excluded from research corpus.
+skip_dir_names:
+  - vendor
+  - build
+  - site-packages
+  - docs_src
+  - docs
+  - examples
+  - example
+  - tutorials
+  - benchmarks
+  - .tox
+  - node_modules
+
+# Repo packaging / pytest hooks — not product source for tokenization.
+skip_file_names:
+  - conftest.py
+  - setup.py

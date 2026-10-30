@@ -8,7 +8,7 @@ import pytest
 
 from toklab.core.types import SourceFile
 from toklab.data.dedup import cluster_duplicates, merge_repos_for_clusters
-from toklab.data.ingest import ingest_repos
+from toklab.data.ingest import ingest_repos, load_ingest_config
 from toklab.data.splits import (
     ManifestView,
     assign_splits,
@@ -76,6 +76,46 @@ def test_ingest_skips_vendor_generated_binary_and_large(tmp_path: Path) -> None:
     assert ("repo_e", "e.py") in paths
     assert all(f.language == "python" for f in files)
     assert all(f.split == "" for f in files)
+
+
+def test_ingest_config_lists_docs_examples_and_hook_files() -> None:
+    cfg = load_ingest_config()
+    dirs = cfg["skip_dir_names"]
+    files = cfg["skip_file_names"]
+    for name in (
+        "docs_src",
+        "docs",
+        "examples",
+        "example",
+        "tutorials",
+        "benchmarks",
+        ".tox",
+        "node_modules",
+        "vendor",
+    ):
+        assert name in dirs
+    assert "conftest.py" in files
+    assert "setup.py" in files
+
+
+def test_ingest_skips_docs_examples_conftest_setup(tmp_path: Path) -> None:
+    repos = tmp_path / "repos"
+    keep = "def keep():\n    return 1\n"
+    _write(repos / "demo" / "pkg" / "core.py", keep)
+    _write(repos / "demo" / "docs" / "guide.py", "x = 1\n")
+    _write(repos / "demo" / "docs_src" / "page.py", "x = 2\n")
+    _write(repos / "demo" / "examples" / "demo.py", "x = 3\n")
+    _write(repos / "demo" / "example" / "tiny.py", "x = 4\n")
+    _write(repos / "demo" / "tutorials" / "t.py", "x = 5\n")
+    _write(repos / "demo" / "benchmarks" / "b.py", "x = 6\n")
+    _write(repos / "demo" / ".tox" / "py.py", "x = 7\n")
+    _write(repos / "demo" / "node_modules" / "x.py", "x = 8\n")
+    _write(repos / "demo" / "tests" / "conftest.py", "x = 9\n")
+    _write(repos / "demo" / "setup.py", "x = 10\n")
+    _write(repos / "demo" / "pkg" / "conftest.py", "x = 11\n")
+
+    paths = {(f.repo, f.path) for f in ingest_repos(repos)}
+    assert paths == {("demo", "pkg/core.py")}
 
 
 def test_same_inputs_and_seed_identical_manifest_hash(tmp_path: Path) -> None:
