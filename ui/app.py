@@ -10,7 +10,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
-from api_client import TokLabClient
+from api_client import ApiUnreachableError, TokLabClient
 
 st.set_page_config(page_title="TokLab", layout="wide")
 
@@ -29,9 +29,17 @@ def client() -> TokLabClient:
     return TokLabClient(base)
 
 
+def stop_on_unreachable(exc: ApiUnreachableError) -> None:
+    """Show the friendly API-down message and halt the page cleanly."""
+    st.error(str(exc))
+    st.stop()
+
+
 def fidelity_map(cli: TokLabClient, exp_id: str) -> dict[str, dict[str, Any]]:
     try:
         data = cli.fidelity(exp_id)
+    except ApiUnreachableError as exc:
+        stop_on_unreachable(exc)
     except httpx.HTTPStatusError:
         return {}
     out: dict[str, dict[str, Any]] = {}
@@ -68,6 +76,8 @@ def page_preview(cli: TokLabClient) -> None:
     if st.button("Tokenize", type="primary"):
         try:
             data = cli.preview(text, conditions)
+        except ApiUnreachableError as exc:
+            stop_on_unreachable(exc)
         except httpx.HTTPStatusError as exc:
             st.error(f"API error {exc.response.status_code}: {exc.response.text}")
             return
@@ -96,6 +106,8 @@ def page_comparison(cli: TokLabClient, exp_id: str) -> None:
     fmap = fidelity_map(cli, exp_id)
     try:
         data = cli.results(exp_id, table="token_efficiency_ci")
+    except ApiUnreachableError as exc:
+        stop_on_unreachable(exc)
     except httpx.HTTPStatusError as exc:
         if exc.response.status_code == 409:
             st.warning("Not run / not ready — no chart.")
@@ -151,6 +163,8 @@ def page_factorial(cli: TokLabClient, exp_id: str) -> None:
             st.caption(note)
     try:
         data = cli.factorial(exp_id)
+    except ApiUnreachableError as exc:
+        stop_on_unreachable(exc)
     except httpx.HTTPStatusError as exc:
         if exc.response.status_code == 409:
             st.warning("Factorial not run or a cell is missing — no chart.")
@@ -188,6 +202,8 @@ def page_context(cli: TokLabClient, exp_id: str) -> None:
     fmap = fidelity_map(cli, exp_id)
     try:
         data = cli.results(exp_id, table="context_utilisation")
+    except ApiUnreachableError as exc:
+        stop_on_unreachable(exc)
     except httpx.HTTPStatusError as exc:
         if exc.response.status_code == 409:
             st.warning("Not run — no chart.")
@@ -222,6 +238,8 @@ def page_cost(cli: TokLabClient, exp_id: str) -> None:
     try:
         sys = cli.results(exp_id, table="systems")
         sys_rows = sys.get("rows") or []
+    except ApiUnreachableError as exc:
+        stop_on_unreachable(exc)
     except httpx.HTTPStatusError:
         sys_rows = []
         st.info("Systems latency: not run.")
@@ -240,6 +258,8 @@ def page_cost(cli: TokLabClient, exp_id: str) -> None:
     try:
         vc = cli.results(exp_id, table="vocab_cost")
         rows = vc.get("rows") or []
+    except ApiUnreachableError as exc:
+        stop_on_unreachable(exc)
     except httpx.HTTPStatusError:
         st.info("Vocab overhead: not run.")
         return
@@ -266,6 +286,8 @@ def page_quality(cli: TokLabClient, exp_id: str) -> None:
     try:
         data = cli.results(exp_id, table="quality")
         rows = data.get("rows") or []
+    except ApiUnreachableError as exc:
+        stop_on_unreachable(exc)
     except httpx.HTTPStatusError:
         st.warning("Quality not run — no chart.")
         return
@@ -290,6 +312,8 @@ def page_drift(cli: TokLabClient, exp_id: str) -> None:
     st.header("7 · Drift curve")
     try:
         data = cli.drift(exp_id)
+    except ApiUnreachableError as exc:
+        stop_on_unreachable(exc)
     except httpx.HTTPStatusError as exc:
         if exc.response.status_code == 409:
             st.warning("Drift not run — no chart.")
@@ -317,6 +341,8 @@ def page_report(cli: TokLabClient, exp_id: str) -> None:
     st.header("8 · Report download")
     try:
         md = cli.report_md(exp_id)
+    except ApiUnreachableError as exc:
+        stop_on_unreachable(exc)
     except httpx.HTTPStatusError as exc:
         if exc.response.status_code == 409:
             st.warning("Report not run / not ready.")
@@ -336,11 +362,13 @@ def main() -> None:
     st.title("TokLab")
     st.caption("Display-only UI over stored experiment results (via API).")
     cli = client()
+    # Sidebar connectivity probe (GET /datasets once).
     try:
-        cli.health()
-        st.sidebar.success("API reachable")
-    except Exception as exc:  # noqa: BLE001
-        st.sidebar.error(f"API unreachable: {exc}")
+        cli.datasets()
+        st.sidebar.success("API connected")
+    except ApiUnreachableError as exc:
+        st.sidebar.error("API not reachable")
+        stop_on_unreachable(exc)
 
     page = st.sidebar.radio(
         "Page",
@@ -372,6 +400,8 @@ def main() -> None:
         meta = cli.experiment(eid)
         st.sidebar.write(f"status: **{meta.get('status')}**")
         st.sidebar.json(meta.get("stages") or {})
+    except ApiUnreachableError as exc:
+        stop_on_unreachable(exc)
     except httpx.HTTPStatusError as exc:
         st.error(f"Experiment lookup failed: {exc.response.status_code}")
         return

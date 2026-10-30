@@ -46,6 +46,13 @@ def serve_api_cmd(
 @app.command("serve-ui")
 def serve_ui_cmd(
     port: Annotated[int, typer.Option("--port")] = 8501,
+    api_url: Annotated[
+        str,
+        typer.Option(
+            "--api-url",
+            help="API base URL the UI expects (shown at startup)",
+        ),
+    ] = "http://127.0.0.1:8000",
 ) -> None:
     """Start the Streamlit UI (display-only; talks to the API)."""
     import subprocess
@@ -54,6 +61,9 @@ def serve_ui_cmd(
 
     # src/toklab/cli.py → parents[2] is the repository root.
     ui_app = P(__file__).resolve().parents[2] / "ui" / "app.py"
+    ui_url = f"http://127.0.0.1:{port}"
+    typer.echo(f"UI URL:  {ui_url}")
+    typer.echo(f"API URL: {api_url.rstrip('/')}  (start with: toklab serve-api)")
     cmd = [
         sys.executable,
         "-m",
