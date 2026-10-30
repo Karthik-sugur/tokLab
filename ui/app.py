@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import html
 from typing import Any
 
 import httpx
@@ -10,7 +9,8 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
-from api_client import ApiUnreachableError, TokLabClient
+from api_client import ApiUnavailable, TokLabClient, readable_http_error
+from token_highlight import render_token_highlight_html
 
 st.set_page_config(page_title="TokLab", layout="wide")
 
@@ -29,19 +29,28 @@ def client() -> TokLabClient:
     return TokLabClient(base)
 
 
-def stop_on_unreachable(exc: ApiUnreachableError) -> None:
-    """Show the friendly API-down message and halt the page cleanly."""
+def stop_on_unavailable(exc: ApiUnavailable) -> None:
+    """Friendly API-down message; halt cleanly (no traceback in the browser)."""
     st.error(str(exc))
+    st.stop()
+
+
+def stop_on_http_error(exc: httpx.HTTPStatusError) -> None:
+    """Show status code + API body on every page."""
+    st.error(readable_http_error(exc))
     st.stop()
 
 
 def fidelity_map(cli: TokLabClient, exp_id: str) -> dict[str, dict[str, Any]]:
     try:
         data = cli.fidelity(exp_id)
-    except ApiUnreachableError as exc:
-        stop_on_unreachable(exc)
-    except httpx.HTTPStatusError:
-        return {}
+    except ApiUnavailable as exc:
+        stop_on_unavailable(exc)
+    except httpx.HTTPStatusError as exc:
+        # Missing fidelity table → treat as no badges (not a hard stop).
+        if exc.response.status_code == 409:
+            return {}
+        stop_on_http_error(exc)
     out: dict[str, dict[str, Any]] = {}
     for row in data.get("rows") or []:
         cond = str(row.get("condition"))
@@ -76,29 +85,22 @@ def page_preview(cli: TokLabClient) -> None:
     if st.button("Tokenize", type="primary"):
         try:
             data = cli.preview(text, conditions)
-        except ApiUnreachableError as exc:
-            stop_on_unreachable(exc)
+        except ApiUnavailable as exc:
+            stop_on_unavailable(exc)
         except httpx.HTTPStatusError as exc:
-            st.error(f"API error {exc.response.status_code}: {exc.response.text}")
-            return
+            stop_on_http_error(exc)
         for block in data.get("conditions") or []:
             cond = block["condition"]
             st.subheader(f"{cond} — {block['n_tokens']} tokens")
-            spans = block["spans"]
-            ids = block["ids"]
-            parts: list[str] = []
-            for i, sp in enumerate(spans):
-                piece = text[sp["start"] : sp["end"]]
-                color = COLORS.get(cond, "#333")
-                style = (
-                    f"background:{color}22;border-bottom:2px solid {color};"
-                    "padding:1px 2px;margin:1px"
-                )
-                parts.append(
-                    f'<span style="{style}" title="id={ids[i]}">'
-                    f"{html.escape(piece) or '∅'}</span>"
-                )
-            st.markdown("".join(parts), unsafe_allow_html=True)
+            color = COLORS.get(cond, "#333")
+            html_block = render_token_highlight_html(
+                text,
+                block.get("spans") or [],
+                block.get("ids") or [],
+                color,
+            )
+            # st.html avoids Streamlit markdown mangling backticks/*/_/#.
+            st.html(html_block)
 
 
 def page_comparison(cli: TokLabClient, exp_id: str) -> None:
@@ -106,14 +108,10 @@ def page_comparison(cli: TokLabClient, exp_id: str) -> None:
     fmap = fidelity_map(cli, exp_id)
     try:
         data = cli.results(exp_id, table="token_efficiency_ci")
-    except ApiUnreachableError as exc:
-        stop_on_unreachable(exc)
+    except ApiUnavailable as exc:
+        stop_on_unavailable(exc)
     except httpx.HTTPStatusError as exc:
-        if exc.response.status_code == 409:
-            st.warning("Not run / not ready — no chart.")
-            return
-        st.error(exc.response.text)
-        return
+        stop_on_http_error(exc)
     rows = data.get("rows") or []
     if not rows:
         st.warning("Not run — no chart.")
@@ -163,20 +161,15 @@ def page_factorial(cli: TokLabClient, exp_id: str) -> None:
             st.caption(note)
     try:
         data = cli.factorial(exp_id)
-    except ApiUnreachableError as exc:
-        stop_on_unreachable(exc)
+    except ApiUnavailable as exc:
+        stop_on_unavailable(exc)
     except httpx.HTTPStatusError as exc:
-        if exc.response.status_code == 409:
-            st.warning("Factorial not run or a cell is missing — no chart.")
-            return
-        st.error(exc.response.text)
-        return
+        stop_on_http_error(exc)
     rows = data.get("rows") or []
     if not rows:
         st.warning("Not run — no chart.")
         return
     df = pd.DataFrame(rows)
-    # Interaction estimate with CI vs k
     fig = go.Figure()
     fig.add_trace(
         go.Scatter(
@@ -202,14 +195,10 @@ def page_context(cli: TokLabClient, exp_id: str) -> None:
     fmap = fidelity_map(cli, exp_id)
     try:
         data = cli.results(exp_id, table="context_utilisation")
-    except ApiUnreachableError as exc:
-        stop_on_unreachable(exc)
+    except ApiUnavailable as exc:
+        stop_on_unavailable(exc)
     except httpx.HTTPStatusError as exc:
-        if exc.response.status_code == 409:
-            st.warning("Not run — no chart.")
-            return
-        st.error(exc.response.text)
-        return
+        stop_on_http_error(exc)
     rows = data.get("rows") or []
     if not rows:
         st.warning("Not run — no chart.")
@@ -238,11 +227,15 @@ def page_cost(cli: TokLabClient, exp_id: str) -> None:
     try:
         sys = cli.results(exp_id, table="systems")
         sys_rows = sys.get("rows") or []
-    except ApiUnreachableError as exc:
-        stop_on_unreachable(exc)
-    except httpx.HTTPStatusError:
-        sys_rows = []
-        st.info("Systems latency: not run.")
+    except ApiUnavailable as exc:
+        stop_on_unavailable(exc)
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 409:
+            sys_rows = []
+            st.info("Systems latency: not run.")
+        else:
+            stop_on_http_error(exc)
+            return
     if sys_rows:
         sdf = pd.DataFrame(sys_rows)
         fig = px.line(
@@ -258,11 +251,10 @@ def page_cost(cli: TokLabClient, exp_id: str) -> None:
     try:
         vc = cli.results(exp_id, table="vocab_cost")
         rows = vc.get("rows") or []
-    except ApiUnreachableError as exc:
-        stop_on_unreachable(exc)
-    except httpx.HTTPStatusError:
-        st.info("Vocab overhead: not run.")
-        return
+    except ApiUnavailable as exc:
+        stop_on_unavailable(exc)
+    except httpx.HTTPStatusError as exc:
+        stop_on_http_error(exc)
     if not rows:
         st.warning("Vocab overhead not run — no table.")
         return
@@ -286,11 +278,10 @@ def page_quality(cli: TokLabClient, exp_id: str) -> None:
     try:
         data = cli.results(exp_id, table="quality")
         rows = data.get("rows") or []
-    except ApiUnreachableError as exc:
-        stop_on_unreachable(exc)
-    except httpx.HTTPStatusError:
-        st.warning("Quality not run — no chart.")
-        return
+    except ApiUnavailable as exc:
+        stop_on_unavailable(exc)
+    except httpx.HTTPStatusError as exc:
+        stop_on_http_error(exc)
     if not rows:
         st.warning("Quality not run — no chart.")
         return
@@ -312,14 +303,10 @@ def page_drift(cli: TokLabClient, exp_id: str) -> None:
     st.header("7 · Drift curve")
     try:
         data = cli.drift(exp_id)
-    except ApiUnreachableError as exc:
-        stop_on_unreachable(exc)
+    except ApiUnavailable as exc:
+        stop_on_unavailable(exc)
     except httpx.HTTPStatusError as exc:
-        if exc.response.status_code == 409:
-            st.warning("Drift not run — no chart.")
-            return
-        st.error(exc.response.text)
-        return
+        stop_on_http_error(exc)
     rows = data.get("rows") or []
     if not rows:
         st.warning("Drift not run — no chart.")
@@ -341,14 +328,10 @@ def page_report(cli: TokLabClient, exp_id: str) -> None:
     st.header("8 · Report download")
     try:
         md = cli.report_md(exp_id)
-    except ApiUnreachableError as exc:
-        stop_on_unreachable(exc)
+    except ApiUnavailable as exc:
+        stop_on_unavailable(exc)
     except httpx.HTTPStatusError as exc:
-        if exc.response.status_code == 409:
-            st.warning("Report not run / not ready.")
-            return
-        st.error(exc.response.text)
-        return
+        stop_on_http_error(exc)
     st.download_button(
         "Download report.md",
         data=md,
@@ -362,13 +345,13 @@ def main() -> None:
     st.title("TokLab")
     st.caption("Display-only UI over stored experiment results (via API).")
     cli = client()
-    # Sidebar connectivity probe (GET /datasets once).
+    # Sidebar probe once; do not stop the script here so Tokenize can
+    # still demonstrate the same friendly error if the API drops later.
     try:
         cli.datasets()
         st.sidebar.success("API connected")
-    except ApiUnreachableError as exc:
+    except ApiUnavailable:
         st.sidebar.error("API not reachable")
-        stop_on_unreachable(exc)
 
     page = st.sidebar.radio(
         "Page",
@@ -389,33 +372,45 @@ def main() -> None:
         help="From runs/<hash>/ after `toklab run experiment`",
     )
 
-    if page == "Preview":
-        page_preview(cli)
-        return
-    if not exp_id.strip():
-        st.info("Enter an experiment id in the sidebar for stored-result pages.")
-        return
-    eid = exp_id.strip()
     try:
-        meta = cli.experiment(eid)
+        if page == "Preview":
+            page_preview(cli)
+            return
+        if not exp_id.strip():
+            st.info(
+                "Enter an experiment id in the sidebar for stored-result pages."
+            )
+            return
+        eid = exp_id.strip()
+        try:
+            meta = cli.experiment(eid)
+        except ApiUnavailable as exc:
+            stop_on_unavailable(exc)
+        except httpx.HTTPStatusError as exc:
+            stop_on_http_error(exc)
         st.sidebar.write(f"status: **{meta.get('status')}**")
         st.sidebar.json(meta.get("stages") or {})
-    except ApiUnreachableError as exc:
-        stop_on_unreachable(exc)
-    except httpx.HTTPStatusError as exc:
-        st.error(f"Experiment lookup failed: {exc.response.status_code}")
-        return
 
-    dispatch = {
-        "Comparison": page_comparison,
-        "2x2 interaction": page_factorial,
-        "Context utilisation": page_context,
-        "Cost": page_cost,
-        "Quality": page_quality,
-        "Drift": page_drift,
-        "Report": page_report,
-    }
-    dispatch[page](cli, eid)
+        dispatch = {
+            "Comparison": page_comparison,
+            "2x2 interaction": page_factorial,
+            "Context utilisation": page_context,
+            "Cost": page_cost,
+            "Quality": page_quality,
+            "Drift": page_drift,
+            "Report": page_report,
+        }
+        dispatch[page](cli, eid)
+    except ApiUnavailable as exc:
+        # Safety net: any missed page-level catch still dies cleanly.
+        stop_on_unavailable(exc)
+    except httpx.HTTPStatusError as exc:
+        stop_on_http_error(exc)
+    except httpx.ConnectError:
+        # Last resort if a call bypassed the client wrapper somehow.
+        stop_on_unavailable(ApiUnavailable(cli.base_url))
+    except httpx.TimeoutException:
+        stop_on_unavailable(ApiUnavailable(cli.base_url))
 
 
 if __name__ == "__main__":
