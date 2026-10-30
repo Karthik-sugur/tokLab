@@ -1,29 +1,145 @@
-# Placeholder repository pins for TokLab data collection.
-# Fill url / commit_sha / license before running scripts/fetch_repos.py.
+# Repository pins for TokLab data collection.
+# commit_sha filled by scripts/fetch_repos.py from git rev-parse HEAD.
 # Do not invent commit SHAs.
 
 repos:
-  - name: placeholder-alpha
-    url: https://github.com/TODO/placeholder-alpha.git
-    commit_sha: TODO
-    license: TODO
-
-  - name: placeholder-beta
-    url: https://github.com/TODO/placeholder-beta.git
-    commit_sha: TODO
-    license: TODO
-
-  - name: placeholder-gamma
-    url: https://github.com/TODO/placeholder-gamma.git
-    commit_sha: TODO
-    license: TODO
-
-  - name: placeholder-delta
-    url: https://github.com/TODO/placeholder-delta.git
-    commit_sha: TODO
-    license: TODO
-
-  - name: placeholder-epsilon
-    url: https://github.com/TODO/placeholder-epsilon.git
-    commit_sha: TODO
-    license: TODO
+- name: requests
+  url: https://github.com/psf/requests
+  commit_sha: 3c7baaa05ab4aa49cc819ce3a819d260de19c157
+  license: Apache-2.0
+  include: true
+- name: flask
+  url: https://github.com/pallets/flask
+  commit_sha: d086db856be187255b8ec61ef409357393020f32
+  license: BSD-3-Clause
+  include: true
+- name: click
+  url: https://github.com/pallets/click
+  commit_sha: 2247b35ea1c47c727d7a06e51fa280e12a863ff6
+  license: BSD-3-Clause
+  include: true
+- name: jinja
+  url: https://github.com/pallets/jinja
+  commit_sha: 5ef70112a1ff19c05324ff889dd30405b1002044
+  license: BSD-3-Clause
+  include: true
+- name: werkzeug
+  url: https://github.com/pallets/werkzeug
+  commit_sha: b73dce5a2ce14f7c7fd645699d1d878de48d2948
+  license: BSD-3-Clause
+  include: true
+- name: itsdangerous
+  url: https://github.com/pallets/itsdangerous
+  commit_sha: 672971d66a2ef9f85151e53283113f33d642dabd
+  license: BSD-3-Clause
+  include: true
+- name: httpx
+  url: https://github.com/encode/httpx
+  commit_sha: b5addb64f0161ff6bfe94c124ef76f6a1fba5254
+  license: BSD-3-Clause
+  include: true
+- name: starlette
+  url: https://github.com/encode/starlette
+  commit_sha: 2745bbc5afa2f8ce900d290bedca2bc5d3f3cfe8
+  license: BSD-3-Clause
+  include: true
+- name: uvicorn
+  url: https://github.com/encode/uvicorn
+  commit_sha: 9d81c12a2c411d3bf104368472b708a3218d9b4e
+  license: BSD-3-Clause
+  include: true
+- name: rich
+  url: https://github.com/Textualize/rich
+  commit_sha: 9d8f9a372cc5916fd4781fec207ced7ddac2f08f
+  license: MIT
+  include: true
+- name: attrs
+  url: https://github.com/python-attrs/attrs
+  commit_sha: c8bb9bfaa2843e7844b5bb13bed4370b51feec4f
+  license: MIT
+  include: true
+- name: pydantic
+  url: https://github.com/pydantic/pydantic
+  commit_sha: 779361fe0c4ed5be8ea31e136b4353ae2e5fa673
+  license: MIT
+  include: true
+- name: fastapi
+  url: https://github.com/fastapi/fastapi
+  commit_sha: 79cab5bed28b24d92c185d236feb33f5783dfeb3
+  license: MIT
+  include: true
+- name: pytest
+  url: https://github.com/pytest-dev/pytest
+  commit_sha: 0212785e34eb635b3359e4eccc757de95bf39036
+  license: MIT
+  include: true
+- name: black
+  url: https://github.com/psf/black
+  commit_sha: 408211f4ae4ec7f119aae8a773ad14bcc6a17cba
+  license: MIT
+  include: true
+- name: sqlalchemy
+  url: https://github.com/sqlalchemy/sqlalchemy
+  commit_sha: 2d8e64920e61872d40ccf8430d289ab1cb4688b5
+  license: MIT
+  include: true
+- name: scrapy
+  url: https://github.com/scrapy/scrapy
+  commit_sha: 71e4b2b074b38913dbbab671f36a8624954415ac
+  license: BSD-3-Clause
+  include: true
+- name: celery
+  url: https://github.com/celery/celery
+  commit_sha: 2ef8265b0a1dd977abdbcb087d3208b6575842c1
+  license: BSD-3-Clause
+  include: true
+- name: tornado
+  url: https://github.com/tornadoweb/tornado
+  commit_sha: 57deb98e96e13c5887ddde237c266fa4872ae46d
+  license: Apache-2.0
+  include: true
+- name: aiohttp
+  url: https://github.com/aio-libs/aiohttp
+  commit_sha: 3df45d98441758728d301f077a89d030dd80ed92
+  license: Apache-2.0
+  include: true
+- name: poetry
+  url: https://github.com/python-poetry/poetry
+  commit_sha: d59ff3b47c5d70b5e4934db874e94ea78b98feb8
+  license: MIT
+  include: true
+- name: networkx
+  url: https://github.com/networkx/networkx
+  commit_sha: 8ff5a974cd03813a676c7fa5fdf4e9b6ee710a7f
+  license: BSD-3-Clause
+  include: true
+- name: urllib3
+  url: https://github.com/urllib3/urllib3
+  commit_sha: 2aa7e9c35234a90a1ce09b84dc7b706a6d604674
+  license: MIT
+  include: true
+- name: marshmallow
+  url: https://github.com/marshmallow-code/marshmallow
+  commit_sha: b762ea2d59ca52fe5df76b90de14bed7e5ec5607
+  license: MIT
+  include: true
+- name: jsonschema
+  url: https://github.com/python-jsonschema/jsonschema
+  commit_sha: c497561ea0a95f5aac09cd63d15eb1420eb7bbec
+  license: MIT
+  include: true
+- name: virtualenv
+  url: https://github.com/pypa/virtualenv
+  commit_sha: 861cff7a18c4c75392a8bf68b6bf88aa4a5ee71c
+  license: MIT
+  include: true
+- name: structlog
+  url: https://github.com/hynek/structlog
+  commit_sha: 19c4f21059e853114efa7a93b6e675d93bf7934e
+  license: Apache-2.0
+  include: true
+- name: mkdocs
+  url: https://github.com/mkdocs/mkdocs
+  commit_sha: 2862536793b3c67d9d83c33e0dd6d50a791928f8
+  license: BSD-2-Clause
+  include: true
