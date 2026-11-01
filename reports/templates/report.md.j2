@@ -210,7 +210,7 @@ primary eval set (`{{ primary_eval_set }}`); C3 vs C2, C5 vs C4.
 
 ## Vocabulary drift (drift_holdout repositories)
 
-Proportions ``p ∈ {0, 10, 25, 50}``. Baselines C2/C4; STATIC = frozen adapt
+{% if drift_meta and drift_meta.get("proportions") %}Proportions p ∈ {{ "{" }}{{ drift_meta.proportions|join(", ") }}{{ "}" }} (% of each file's eligible definitions renamed with their uses). {% endif %}Baselines C2/C4; STATIC = frozen adapt
 vocab{% if drift_meta %} (K={{ drift_meta.k_static }}; drift texts: {{ drift_meta.get("drift_texts", "renamed in memory (apply_drift)") }}){% endif %};
 REFRESH = append-only new entries from a small drifted v1 sample (old ids
 unchanged). BPB only for gate-valid fine-tuned variants.

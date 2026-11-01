@@ -390,15 +390,34 @@ def report_cmd(
         Path,
         typer.Option("--hypotheses", help="hypotheses.yaml path"),
     ] = Path("configs/hypotheses.yaml"),
+    fmt: Annotated[
+        str,
+        typer.Option(
+            "--format",
+            help="md: re-render runs/<hash>/report.md; html: also write a "
+            "self-contained HTML copy (opens with no server)",
+        ),
+    ] = "md",
+    out: Annotated[
+        Path,
+        typer.Option("--out", help="HTML output path (with --format html)"),
+    ] = Path("demo_assets/report.html"),
 ) -> None:
-    """Re-render Markdown report for an existing run hash."""
+    """Re-render the report for an existing run hash."""
     from toklab.evaluation.report import render_report
 
+    if fmt not in {"md", "html"}:
+        raise typer.BadParameter(f"--format must be md or html, got {fmt!r}")
     run_dir = runs_root / run
     if not run_dir.is_dir():
         raise typer.BadParameter(f"run directory not found: {run_dir}")
     path = render_report(run_dir=run_dir, hypotheses_path=hypotheses)
     typer.echo(f"report={path.resolve()}")
+    if fmt == "html":
+        from toklab.evaluation.report_html import write_report_html
+
+        html_path = write_report_html(path, out)
+        typer.echo(f"report_html={html_path.resolve()}")
 
 
 @run_app.command("baselines")

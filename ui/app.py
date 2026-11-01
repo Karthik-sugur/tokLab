@@ -10,6 +10,8 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 from api_client import ApiUnavailable, TokLabClient, readable_http_error
+from demo_defaults import default_api_url, default_run_id, default_snippet
+from table_filters import eval_sets, filter_rows, k_label, k_star, k_values
 from token_highlight import render_token_highlight_html
 
 st.set_page_config(page_title="TokLab", layout="wide")
@@ -25,7 +27,7 @@ COLORS = {
 
 
 def client() -> TokLabClient:
-    base = st.sidebar.text_input("API base URL", value="http://127.0.0.1:8000")
+    base = st.sidebar.text_input("API base URL", value=default_api_url())
     return TokLabClient(base)
 
 
@@ -41,7 +43,12 @@ def stop_on_http_error(exc: httpx.HTTPStatusError) -> None:
     st.stop()
 
 
-def fidelity_map(cli: TokLabClient, exp_id: str) -> dict[str, dict[str, Any]]:
+def fidelity_map(
+    cli: TokLabClient,
+    exp_id: str,
+    eval_set: str | None = None,
+    k: int | None = None,
+) -> dict[str, dict[str, Any]]:
     try:
         data = cli.fidelity(exp_id)
     except ApiUnavailable as exc:
@@ -52,13 +59,50 @@ def fidelity_map(cli: TokLabClient, exp_id: str) -> dict[str, dict[str, Any]]:
             return {}
         stop_on_http_error(exc)
     out: dict[str, dict[str, Any]] = {}
-    for row in data.get("rows") or []:
+    for row in filter_rows(data.get("rows") or [], eval_set, k):
         cond = str(row.get("condition"))
         valid = bool(row.get("valid", True))
         status = str(row.get("status", "OK" if valid else "INVALID"))
         reason = status if valid else f"{status}: round-trip failures"
+        if cond in out and not out[cond]["valid"]:
+            continue
         out[cond] = {"valid": valid, "reason": reason, "row": row}
     return out
+
+
+def ci_level(df: pd.DataFrame) -> str:
+    """CI level from the stored ``alpha`` column (e.g. alpha 0.05 -> '95%')."""
+    if "alpha" not in df.columns or df["alpha"].nunique() != 1:
+        return "bootstrap"
+    return f"{(1 - float(df['alpha'].iloc[0])) * 100:g}%"
+
+
+def fetch_kstar(cli: TokLabClient, exp_id: str) -> int | None:
+    try:
+        return k_star(cli.factorial(exp_id).get("rows") or [])
+    except httpx.HTTPStatusError:
+        return None
+
+
+def pick_eval_set(rows: list[dict[str, Any]], key: str) -> str | None:
+    sets = eval_sets(rows)
+    if not sets:
+        return None
+    return st.selectbox("Eval set", sets, index=0, key=f"{key}_eval_set")
+
+
+def pick_k(rows: list[dict[str, Any]], kstar: int | None, key: str) -> int | None:
+    ks = k_values(rows)
+    if not ks:
+        return None
+    default = ks.index(kstar) if kstar in ks else len(ks) - 1
+    return st.selectbox(
+        "K (adapted vocabulary size)",
+        ks,
+        index=default,
+        format_func=lambda k: k_label(k, kstar),
+        key=f"{key}_k",
+    )
 
 
 def grey_note(cond: str, fmap: dict[str, dict[str, Any]]) -> str | None:
@@ -72,15 +116,11 @@ def grey_note(cond: str, fmap: dict[str, dict[str, Any]]) -> str | None:
 
 def page_preview(cli: TokLabClient, exp_id: str = "") -> None:
     st.header("1 · Preview")
-    text = st.text_area(
-        "Snippet",
-        value="def AcmeWidgetFactory(x):\n    return x\n",
-        height=160,
-    )
+    text = st.text_area("Snippet", value=default_snippet(), height=260)
     conditions = st.multiselect(
         "Conditions",
         ["C2", "C3", "C4", "C5"],
-        default=["C2", "C4", "C5"],
+        default=["C2", "C3", "C4", "C5"],
     )
     if st.button("Tokenize", type="primary"):
         try:
@@ -107,7 +147,6 @@ def page_preview(cli: TokLabClient, exp_id: str = "") -> None:
 
 def page_comparison(cli: TokLabClient, exp_id: str) -> None:
     st.header("2 · Comparison (tokens/KB)")
-    fmap = fidelity_map(cli, exp_id)
     try:
         data = cli.results(exp_id, table="token_efficiency_ci")
     except ApiUnavailable as exc:
@@ -117,6 +156,17 @@ def page_comparison(cli: TokLabClient, exp_id: str) -> None:
     rows = data.get("rows") or []
     if not rows:
         st.warning("Not run — no chart.")
+        return
+    kstar = fetch_kstar(cli, exp_id)
+    col1, col2 = st.columns(2)
+    with col1:
+        eval_set = pick_eval_set(rows, "cmp")
+    with col2:
+        k = pick_k(rows, kstar, "cmp")
+    rows = filter_rows(rows, eval_set, k)
+    fmap = fidelity_map(cli, exp_id, eval_set, k)
+    if not rows:
+        st.warning("Not run for this eval set / K — no chart.")
         return
     df = pd.DataFrame(rows)
     notes = []
@@ -150,17 +200,20 @@ def page_comparison(cli: TokLabClient, exp_id: str) -> None:
                 marker_color=COLORS.get(str(r["condition"]), "#666"),
             )
         )
-    fig.update_layout(yaxis_title="tokens / KB (lower better)", showlegend=False)
-    st.plotly_chart(fig, use_container_width=True)
+    fig.update_layout(
+        yaxis_title="tokens / KB (lower better)",
+        showlegend=False,
+        title=f"{eval_set or ''} · K={k_label(k, kstar) if k is not None else '—'}"
+        f" · error bars = {ci_level(plot_df)} cluster-bootstrap CI over repositories",
+    )
+    st.plotly_chart(fig, width="stretch")
+    cols = [c for c in ("condition", "estimate", "ci_low", "ci_high", "n_repos")
+            if c in plot_df.columns]
+    st.dataframe(plot_df[cols], width="stretch", hide_index=True)
 
 
 def page_factorial(cli: TokLabClient, exp_id: str) -> None:
     st.header("3 · 2×2 interaction")
-    fmap = fidelity_map(cli, exp_id)
-    for cond in ("C2", "C3", "C4", "C5"):
-        note = grey_note(cond, fmap)
-        if note:
-            st.caption(note)
     try:
         data = cli.factorial(exp_id)
     except ApiUnavailable as exc:
@@ -171,7 +224,15 @@ def page_factorial(cli: TokLabClient, exp_id: str) -> None:
     if not rows:
         st.warning("Not run — no chart.")
         return
-    df = pd.DataFrame(rows)
+    kstar = k_star(rows)
+    eval_set = pick_eval_set(rows, "fac")
+    rows = filter_rows(rows, eval_set)
+    fmap = fidelity_map(cli, exp_id, eval_set, kstar)
+    for cond in ("C2", "C3", "C4", "C5"):
+        note = grey_note(cond, fmap)
+        if note:
+            st.caption(note)
+    df = pd.DataFrame(rows).sort_values("k")
     fig = go.Figure()
     fig.add_trace(
         go.Scatter(
@@ -187,14 +248,20 @@ def page_factorial(cli: TokLabClient, exp_id: str) -> None:
             },
         )
     )
-    fig.update_layout(xaxis_title="K", yaxis_title="interaction I (tokens/KB)")
-    st.plotly_chart(fig, use_container_width=True)
-    st.dataframe(df, use_container_width=True)
+    fig.add_hline(y=0, line_dash="dot")
+    if kstar is not None:
+        fig.add_vline(x=kstar, line_dash="dash", annotation_text="K*")
+    fig.update_layout(
+        xaxis_title="K",
+        yaxis_title="interaction I (tokens/KB)",
+        title=f"{eval_set or ''} · I = (C5−C4) − (C3−C2) with bootstrap CI",
+    )
+    st.plotly_chart(fig, width="stretch")
+    st.dataframe(df, width="stretch", hide_index=True)
 
 
 def page_context(cli: TokLabClient, exp_id: str) -> None:
     st.header("4 · Context utilisation")
-    fmap = fidelity_map(cli, exp_id)
     try:
         data = cli.results(exp_id, table="context_utilisation")
     except ApiUnavailable as exc:
@@ -205,6 +272,13 @@ def page_context(cli: TokLabClient, exp_id: str) -> None:
     if not rows:
         st.warning("Not run — no chart.")
         return
+    eval_set = pick_eval_set(rows, "ctx")
+    rows = filter_rows(rows, eval_set)
+    ks = k_values(rows)
+    k = ks[0] if len(ks) == 1 else None
+    if k is not None:
+        st.caption(f"Stored at K={k}.")
+    fmap = fidelity_map(cli, exp_id, eval_set, k)
     df = pd.DataFrame(rows)
     invalid = {c for c, info in fmap.items() if not info["valid"]}
     for c in invalid:
@@ -221,7 +295,7 @@ def page_context(cli: TokLabClient, exp_id: str) -> None:
         markers=True,
         color_discrete_map=COLORS,
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
 
 def page_cost(cli: TokLabClient, exp_id: str) -> None:
@@ -249,19 +323,21 @@ def page_cost(cli: TokLabClient, exp_id: str) -> None:
             color_discrete_map=COLORS,
         )
         fig.update_layout(yaxis_title="median latency (ms)")
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
     try:
         vc = cli.results(exp_id, table="vocab_cost")
         rows = vc.get("rows") or []
     except ApiUnavailable as exc:
         stop_on_unavailable(exc)
     except httpx.HTTPStatusError as exc:
-        stop_on_http_error(exc)
+        if exc.response.status_code != 409:
+            stop_on_http_error(exc)
+        rows = []
     if not rows:
         st.warning("Vocab overhead not run — no table.")
         return
     st.subheader("Vocab / KV overhead (ESTIMATE)")
-    st.dataframe(pd.DataFrame(rows), use_container_width=True)
+    st.dataframe(pd.DataFrame(rows), width="stretch")
     vdf = pd.DataFrame(rows)
     if "kv_kv_cache_bytes" in vdf.columns:
         fig2 = px.line(
@@ -271,7 +347,7 @@ def page_cost(cli: TokLabClient, exp_id: str) -> None:
             markers=True,
             title="KV cache bytes",
         )
-        st.plotly_chart(fig2, use_container_width=True)
+        st.plotly_chart(fig2, width="stretch")
 
 
 def page_quality(cli: TokLabClient, exp_id: str) -> None:
@@ -283,7 +359,9 @@ def page_quality(cli: TokLabClient, exp_id: str) -> None:
     except ApiUnavailable as exc:
         stop_on_unavailable(exc)
     except httpx.HTTPStatusError as exc:
-        stop_on_http_error(exc)
+        if exc.response.status_code != 409:
+            stop_on_http_error(exc)
+        rows = []
     if not rows:
         st.warning("Quality not run — no chart.")
         return
@@ -304,12 +382,13 @@ def page_quality(cli: TokLabClient, exp_id: str) -> None:
 def page_drift(cli: TokLabClient, exp_id: str) -> None:
     st.header("7 · Drift curve")
     try:
-        data = cli.drift(exp_id)
+        rows = cli.drift(exp_id).get("rows") or []
     except ApiUnavailable as exc:
         stop_on_unavailable(exc)
     except httpx.HTTPStatusError as exc:
-        stop_on_http_error(exc)
-    rows = data.get("rows") or []
+        if exc.response.status_code != 409:
+            stop_on_http_error(exc)
+        rows = []
     if not rows:
         st.warning("Drift not run — no chart.")
         return
@@ -322,8 +401,8 @@ def page_drift(cli: TokLabClient, exp_id: str) -> None:
         markers=True,
         title="Token reduction vs baseline by drift proportion",
     )
-    st.plotly_chart(fig, use_container_width=True)
-    st.dataframe(df, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
+    st.dataframe(df, width="stretch")
 
 
 def page_report(cli: TokLabClient, exp_id: str) -> None:
@@ -370,8 +449,8 @@ def main() -> None:
     )
     exp_id = st.sidebar.text_input(
         "Experiment id (config hash)",
-        value="",
-        help="From runs/<hash>/ after `toklab run experiment`",
+        value=default_run_id(),
+        help="Pre-filled from TOKLAB_DEFAULT_RUN or configs/demo.yaml",
     )
 
     try:

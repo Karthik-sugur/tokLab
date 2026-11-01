@@ -9,8 +9,10 @@ decision rule are identical before and after this decision.
 
 ## What we saw in run 0250decc (preliminary v1)
 
-All numbers below are copied from `runs/0250decc.../report.md` and from
-`scripts/diagnose_vocab.py` output (`logs/taskA_vocab_diag_*.log`).
+All numbers below are copied from the stored tables of `runs/0250decc.../`
+(`drift_metrics.parquet`, `factorial_effects.parquet`, rounded to two
+decimals) and from `scripts/diagnose_vocab.py` output
+(`logs/taskA_vocab_diag_*.log`).
 
 - Drift table: STATIC vocabulary |V| = 8, REFRESH |V| = 12; STATIC_C5
   coverage 0.004, STATIC_C3 coverage 0.000; token reduction 0.000 for every

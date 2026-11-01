@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "toklab"
 version = "0.1.0"
 description = "Research workbench for structure-aware and domain-adapted code tokenization"
-readme = "AGENTS.md"
+readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "typer>=0.12",

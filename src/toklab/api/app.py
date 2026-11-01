@@ -21,6 +21,7 @@ from toklab.api.schemas import (
     TokenizePreviewResponse,
 )
 from toklab.api.worker import ExperimentWorker
+from toklab.evaluation.report_html import markdown_to_html
 from toklab.experiments.config import ExperimentConfig
 from toklab.experiments.preview import MAX_PREVIEW_CHARS, preview_tokenize
 from toklab.experiments.store import (
@@ -304,18 +305,7 @@ def create_app(
             raise _http(409, "report not ready", "not_ready")
         if format == "md":
             return PlainTextResponse(md, media_type="text/markdown")
-        # Minimal HTML wrap — no metric computation.
-        escaped = (
-            md.replace("&", "&amp;")
-            .replace("<", "&lt;")
-            .replace(">", "&gt;")
-        )
-        html = (
-            "<!DOCTYPE html><html><head><meta charset='utf-8'>"
-            "<title>TokLab report</title></head><body>"
-            f"<pre>{escaped}</pre></body></html>"
-        )
-        return HTMLResponse(html)
+        return HTMLResponse(markdown_to_html(md))
 
     @app.get("/experiments/{exp_id}/fidelity")
     def get_fidelity(exp_id: str) -> dict[str, Any]:

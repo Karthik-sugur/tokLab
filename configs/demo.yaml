@@ -1,0 +1,9 @@
+# Demo defaults (UI sidebar + scripts/demo.sh + scripts/export_demo_bundle.sh).
+# TOKLAB_DEFAULT_RUN overrides demo_run.
+demo_run: a63c884760b93db98798e5e5e6dadba5be8653ae956b66cd4ef9f011908c3403
+
+# Pre-filled Preview snippet: the first preview_lines lines of this file.
+# A hand-picked val file used as an illustration only; measured results are
+# on the Comparison / 2x2 pages and in the report.
+preview_file: data/synthetic/val/aiohttp/aiohttp/resolver.py
+preview_lines: 30

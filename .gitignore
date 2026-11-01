@@ -34,3 +34,8 @@ htmlcov/
 
 # Model / HF caches (local)
 .cache/huggingface/
+
+# Demo outputs (generated)
+/demo_assets/
+/demo_bundle.zip
+/BUNDLE_MANIFEST.txt
