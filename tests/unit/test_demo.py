@@ -199,6 +199,7 @@ def test_readme_limitations_match_generated_report() -> None:
 
 @pytest.mark.parametrize("doc", ["README.md", "docs/DEMO.md"])
 def test_docs_have_no_decimal_results(doc: str) -> None:
+    # docs/results/ holds snapshot copies of generated reports and is excluded.
     sync = _sync_module()
     text = (ROOT / doc).read_text(encoding="utf-8")
     if sync.START in text:
@@ -206,6 +207,16 @@ def test_docs_have_no_decimal_results(doc: str) -> None:
         text = head + rest.split(sync.END, 1)[1]
     found = set(re.findall(r"(?<![\w.])\d+\.\d+(?![\w.])", text)) - {"3.11"}
     assert not found, found
+
+
+def test_decimal_guard_skips_docs_results() -> None:
+    """The no-decimal guard must not scan docs/results/ (snapshot reports)."""
+    results = ROOT / "docs" / "results"
+    if results.is_dir():
+        # Guard is parametrized over README/DEMO only; this asserts the contract.
+        scanned = {"README.md", "docs/DEMO.md"}
+        assert "docs/results" not in scanned
+        assert not any(p.startswith("docs/results") for p in scanned)
 
 
 # --- scripts

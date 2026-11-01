@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 from typing import Any
 
@@ -221,7 +222,17 @@ def _df_records(df: pd.DataFrame | None) -> list[dict[str, Any]]:
     return df.to_dict(orient="records")
 
 
-def interaction_note(effects: pd.DataFrame | None, k: int | None) -> str:
+def ci_level_label(alpha: float) -> str:
+    """Human CI level from alpha (e.g. 0.05 -> '95%')."""
+    return f"{(1.0 - float(alpha)) * 100:g}%"
+
+
+def interaction_note(
+    effects: pd.DataFrame | None,
+    k: int | None,
+    *,
+    alpha: float = 0.05,
+) -> str:
     """One CI-driven sentence about the 2×2 interaction at ``k``."""
     if effects is None or effects.empty:
         return ""
@@ -230,7 +241,10 @@ def interaction_note(effects: pd.DataFrame | None, k: int | None) -> str:
         return f"No factorial row at K*={k}."
     iest = float(row["interaction"])
     ilo, ihi = float(row["interaction_low"]), float(row["interaction_high"])
-    stat = f"I={iest:.4f}, 95% CI [{ilo:.4f}, {ihi:.4f}] at K={int(row['k'])}"
+    level = ci_level_label(alpha)
+    stat = (
+        f"I={iest:.4f}, {level} CI [{ilo:.4f}, {ihi:.4f}] at K={int(row['k'])}"
+    )
     if not _ci_excludes_zero(ilo, ihi):
         text = f"No evidence of an interaction (CI includes zero): {stat}."
     elif iest > 0:
@@ -257,6 +271,50 @@ def interaction_note(effects: pd.DataFrame | None, k: int | None) -> str:
                 "of C3/C4 with a CI excluding zero."
             )
     return text
+
+
+def method_notes(
+    *,
+    n_boot: int | None,
+    alpha: float | None,
+    test_repos: int | None,
+) -> list[str]:
+    """How CIs and hypothesis verdicts are computed (no invented numbers)."""
+    a = 0.05 if alpha is None else float(alpha)
+    level = ci_level_label(a)
+    notes: list[str] = []
+    if n_boot is not None:
+        notes.append(
+            f"Cluster bootstrap: n_boot={n_boot}, alpha={a} "
+            f"({level} percentile CI), repositories resampled with replacement."
+        )
+    else:
+        notes.append(
+            f"Cluster bootstrap alpha={a} ({level} percentile CI); "
+            "n_boot not recorded for this run."
+        )
+    notes.append(
+        "H1–H3 compare each condition's separate CI with C2's CI (overlap): "
+        "supported only if the condition's CI lies entirely below C2's CI "
+        "(and the effect estimate is negative); not supported if entirely "
+        "above; otherwise inconclusive. H4 and H5 use paired per-repository "
+        "difference CIs (repository-weighted)."
+    )
+    notes.append(
+        "configs/hypotheses.yaml states the claims and the H4 decision rule "
+        "but does not specify whether contrasts use overlapping separate CIs "
+        "or paired per-repository CIs; the report implements the overlap rule "
+        "for H1–H3 and paired CIs for H4/H5."
+    )
+    if test_repos is not None and test_repos > 0:
+        # Distinct multisets of size n drawn with replacement from n repos.
+        n_distinct = math.comb(2 * test_repos - 1, test_repos)
+        notes.append(
+            f"With {test_repos} test repositories there are only "
+            f"{n_distinct} distinct bootstrap resamples "
+            f"(combinations with replacement); CIs are therefore coarse."
+        )
+    return notes
 
 
 def effects_averaging_note(
@@ -318,6 +376,7 @@ def _eval_set_section(
     k_star: int | None,
     k_judged: int | None,
     hypotheses_blocked: str,
+    alpha: float = 0.05,
 ) -> dict[str, Any]:
     fidelity_rows = _with_k(_df_records(fidelity))
     invalid: set[str] = set()
@@ -378,7 +437,9 @@ def _eval_set_section(
             effects, efficiency, k_judged if k_judged is not None else k_star
         ),
         "interaction_note": (
-            "" if hypotheses_blocked else interaction_note(effects, k_judged)
+            ""
+            if hypotheses_blocked
+            else interaction_note(effects, k_judged, alpha=alpha)
         ),
         "context": _with_k(_df_records(context)),
         "hypotheses": verdicts,
@@ -409,6 +470,7 @@ def build_limitations(
     primary: str,
     any_invalid: bool,
     test_repos: int | None,
+    systems_ran: bool = False,
 ) -> list[str]:
     """Limitations, filled in from run data where the run recorded it."""
     vocab = cfg.get("vocab") or {}
@@ -502,12 +564,14 @@ def build_limitations(
         "selected: they inflate gains on test_inorg (same repositories) and "
         "overfit relative to test (new repositories)."
     )
-    out.append(
+    quality = (
         "Quality not measured: no fine-tuning was run, so there is no "
         "bits-per-byte result; C3/C5 add untrained embedding rows and any "
-        "quality figure for them is suppressed (systems rows tagged "
-        "quality_valid=False)."
+        "quality figure for them is suppressed"
     )
+    if systems_ran:
+        quality += " (systems rows tagged quality_valid=False)"
+    out.append(quality + ".")
     excluded = corpus.get("excluded_files") or []
     if excluded:
         out.append(
@@ -521,9 +585,11 @@ def build_limitations(
         "FLOPs / KV / param overhead figures are ESTIMATE labels, not measured."
     )
     out.append(
-        "Drift REFRESH may append tokens mined from a small drifted v1 sample; "
-        "old adapted ids stay unchanged (append-only). Drift BPB is reported "
-        "only for gate-valid fine-tuned variants; otherwise marked not run."
+        "Drift REFRESH may append tokens mined from a drifted v1 sample "
+        "(size recorded in drift_meta); old adapted ids stay unchanged "
+        "(append-only). Drift BPB is reported only for gate-valid fine-tuned "
+        "variants; otherwise marked not run. This does not show robustness "
+        "to large-scale renaming."
     )
     out.append(
         "Conditions failing fidelity are marked INVALID and excluded "
@@ -532,6 +598,182 @@ def build_limitations(
         else "All evaluated conditions passed fidelity on this run."
     )
     return out
+
+
+def _bootstrap_params(
+    efficiency: pd.DataFrame | None, cfg: dict[str, Any]
+) -> tuple[int | None, float]:
+    """n_boot and alpha from stored CI table, else from config."""
+    alpha = 0.05
+    n_boot: int | None = None
+    if efficiency is not None and not efficiency.empty:
+        if "alpha" in efficiency.columns and efficiency["alpha"].notna().any():
+            alpha = float(efficiency["alpha"].dropna().iloc[0])
+        if "n_boot" in efficiency.columns and efficiency["n_boot"].notna().any():
+            n_boot = int(efficiency["n_boot"].dropna().iloc[0])
+    if n_boot is None:
+        intrinsic = cfg.get("intrinsic") or {}
+        if "n_boot" in intrinsic:
+            n_boot = int(intrinsic["n_boot"])
+    return n_boot, alpha
+
+
+def _load_baselines(run_dir: Path) -> dict[str, Any]:
+    """Intrinsic C1/C2/C6 under ``runs/<hash>/baselines/`` if present."""
+    base = run_dir / "baselines"
+    if not base.is_dir():
+        return {"ran": False, "rows": [], "note": "not run"}
+    fid = _read_parquet(base, "fidelity.parquet")
+    eff = _read_parquet(base, "token_efficiency_ci.parquet")
+    by_fid = {}
+    if fid is not None and not fid.empty:
+        by_fid = {str(r["condition"]): r for r in _df_records(fid)}
+    rows: list[dict[str, Any]] = []
+    if eff is not None and not eff.empty:
+        for r in _df_records(eff):
+            cond = str(r["condition"])
+            f = by_fid.get(cond, {})
+            valid = bool(r.get("valid", f.get("valid", True)))
+            rows.append(
+                {
+                    "condition": cond,
+                    "estimate": float(r["estimate"]),
+                    "ci_low": float(r["ci_low"]),
+                    "ci_high": float(r["ci_high"]),
+                    "n_repos": int(r["n_repos"]),
+                    "n_boot": int(r.get("n_boot") or 0) or None,
+                    "valid": valid,
+                    "status": str(
+                        r.get("status")
+                        or f.get("status")
+                        or ("OK" if valid else "INVALID")
+                    ),
+                    "n_files": f.get("n_files"),
+                    "n_roundtrip_fail": f.get("n_roundtrip_fail", 0),
+                }
+            )
+    elif by_fid:
+        for cond, f in by_fid.items():
+            rows.append(
+                {
+                    "condition": cond,
+                    "estimate": None,
+                    "ci_low": None,
+                    "ci_high": None,
+                    "n_repos": None,
+                    "n_boot": None,
+                    "valid": bool(f.get("valid", True)),
+                    "status": str(f.get("status", "OK")),
+                    "n_files": f.get("n_files"),
+                    "n_roundtrip_fail": f.get("n_roundtrip_fail", 0),
+                }
+            )
+    return {
+        "ran": bool(rows),
+        "rows": rows,
+        "note": (
+            "Intrinsic baselines on the same eval text as the 2×2 "
+            "(not part of the factorial grid)."
+            if rows
+            else "not run"
+        ),
+    }
+
+
+def drift_rename_shares(corpus: dict[str, Any]) -> list[dict[str, Any]]:
+    """Renamed definition/occurrence shares from the synthetic rename map.
+
+    Counts come from ``rename_map.json`` and the pre-generated ``drift/p*``
+    files when present. Occurrence totals use Python NAME tokens (non-keyword)
+    on the p=0 texts.
+    """
+    root = Path(str(corpus.get("dir") or "data/synthetic"))
+    measured = corpus.get("drift_rename_shares")
+    if measured:
+        return list(measured)
+    summary_path = root / "synth_summary.json"
+    if summary_path.is_file():
+        summary = json.loads(summary_path.read_text(encoding="utf-8"))
+        if summary.get("drift_rename_shares"):
+            return list(summary["drift_rename_shares"])
+    rename_path = root / "rename_map.json"
+    if not rename_path.is_file():
+        return []
+    data = json.loads(rename_path.read_text(encoding="utf-8"))
+    drift = data.get("drift") or {}
+    if not drift:
+        return []
+
+    import io
+    import keyword
+    import tokenize
+
+    from toklab.data.synth.drift import collect_renameable_names
+
+    def _names(text: str) -> list[str] | None:
+        try:
+            return [
+                t.string
+                for t in tokenize.generate_tokens(io.StringIO(text).readline)
+                if t.type == tokenize.NAME and not keyword.iskeyword(t.string)
+            ]
+        except (tokenize.TokenError, SyntaxError, IndentationError):
+            return None
+
+    files = sorted(next(iter(drift.values()), {}).keys())
+    p0_root = root / "drift" / "p0"
+    tot_occ = 0
+    elig = 0
+    p0_names: dict[str, list[str]] = {}
+    for rel in files:
+        path = p0_root / rel
+        if not path.is_file():
+            continue
+        text = path.read_text(encoding="utf-8")
+        names = _names(text)
+        if names is None:
+            continue
+        p0_names[rel] = names
+        tot_occ += len(names)
+        elig += len(collect_renameable_names(text))
+    if tot_occ == 0:
+        return []
+    rows: list[dict[str, Any]] = []
+    for p_str, files_map in sorted(drift.items(), key=lambda kv: int(kv[0])):
+        p = int(p_str)
+        if p == 0:
+            continue
+        n_defs = 0
+        n_touched = 0
+        n_occ = 0
+        for rel, mapping in files_map.items():
+            if not mapping:
+                continue
+            n_touched += 1
+            n_defs += len(mapping)
+            new = set(mapping.values())
+            drifted = root / "drift" / f"p{p}" / rel
+            if drifted.is_file():
+                dn = _names(drifted.read_text(encoding="utf-8")) or []
+                n_occ += sum(1 for x in dn if x in new)
+            else:
+                # Fallback: occurrences of old names in p0 that were renamed.
+                olds = set(mapping)
+                n_occ += sum(1 for x in p0_names.get(rel, []) if x in olds)
+        rows.append(
+            {
+                "proportion": p,
+                "n_files": len(files),
+                "files_touched": n_touched,
+                "renamed_definitions": n_defs,
+                "eligible_definitions": elig,
+                "definition_fraction": (n_defs / elig) if elig else None,
+                "renamed_occurrences": n_occ,
+                "total_occurrences": tot_occ,
+                "occurrence_fraction": (n_occ / tot_occ) if tot_occ else None,
+            }
+        )
+    return rows
 
 
 def build_report_context(
@@ -565,7 +807,10 @@ def build_report_context(
     vocab_cost_by_k = _read_parquet(run_dir, "vocab_cost_by_k.parquet")
     drift = _read_parquet(run_dir, "drift_metrics.parquet")
     drift_meta = _read_json(run_dir, "drift_meta.json")
+    paired = _read_parquet(run_dir, "paired_differences.parquet")
+    paired_meta = _read_json(run_dir, "paired_meta.json")
     hypo = _load_hypotheses(hypotheses_path)
+    n_boot, alpha = _bootstrap_params(efficiency, cfg)
 
     k_star = selection.get("k_star") if selection else None
     if selection:
@@ -592,6 +837,7 @@ def build_report_context(
             k_star=k_star,
             k_judged=k_judged,
             hypotheses_blocked=blocked,
+            alpha=alpha,
         )
         for name in names
     ]
@@ -600,6 +846,19 @@ def build_report_context(
     test_repos = len((corpus.get("repos_per_split") or {}).get("test", [])) or None
 
     systems_rows = _df_records(systems)
+    systems_ran = bool(systems_rows)
+    baselines = _load_baselines(run_dir)
+    drift_shares: list[dict[str, Any]] = []
+    if corpus:
+        cached = run_dir / "drift_rename_shares.json"
+        if cached.is_file():
+            drift_shares = json.loads(cached.read_text(encoding="utf-8"))
+        else:
+            drift_shares = drift_rename_shares(corpus)
+            if drift_shares:
+                cached.write_text(
+                    json.dumps(drift_shares, indent=2) + "\n", encoding="utf-8"
+                )
     return {
         "run_dir": str(run_dir.resolve()),
         "config_hash": config_hash,
@@ -614,12 +873,22 @@ def build_report_context(
         "primary_eval_set": primary,
         "eval_sets": sections,
         "any_invalid": any_invalid,
+        "method_notes": method_notes(
+            n_boot=n_boot, alpha=alpha, test_repos=test_repos
+        ),
+        "ci_level": ci_level_label(alpha),
+        "n_boot": n_boot,
+        "alpha": alpha,
         "systems": systems_rows,
         "systems_status": str((status.get("stages") or {}).get("systems", "")),
         "vocab_cost": _with_k(_df_records(vocab_cost)),
         "vocab_cost_by_k": _with_k(_df_records(vocab_cost_by_k)),
         "drift": _df_records(drift),
         "drift_meta": drift_meta,
+        "drift_rename_shares": drift_shares,
+        "paired": _df_records(paired),
+        "paired_meta": paired_meta,
+        "baselines": baselines,
         "decision_rule": str(hypo.get("decision_rule", "")).strip(),
         "limitations": build_limitations(
             corpus=corpus,
@@ -629,6 +898,7 @@ def build_report_context(
             primary=primary,
             any_invalid=any_invalid,
             test_repos=test_repos,
+            systems_ran=systems_ran,
         ),
     }
 

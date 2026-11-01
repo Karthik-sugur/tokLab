@@ -92,6 +92,14 @@ K selection not recorded (legacy run): hypotheses use the largest K.
 | `{{ s.name }}` | {% if s.primary %}primary{% else %}secondary{% endif %} | {{ s.label }} | {% if s.ran %}{{ s.status_note or "run" }}{% else %}{{ s.status_note }}{% endif %} |
 {% endfor %}
 
+## Method notes (CIs and hypotheses)
+
+{% for note in method_notes %}
+- {{ note }}
+{% else %}
+- not recorded
+{% endfor %}
+
 {% for s in eval_sets %}
 # Eval set `{{ s.name }}`: {{ s.label }}
 
@@ -146,6 +154,9 @@ Pre-registered decision rule (quoted from configs/hypotheses.yaml): "{{ decision
 ## Context utilisation [{{ s.name }}]
 
 Greedy first-fit packing in fixed `file_id` order{% if s.context and s.context[0].k is not none %} at K={{ s.context[0].k }}{% endif %}.
+``files_fit`` is not monotonic in the budget because packing is greedy
+first-fit in that fixed order: a larger budget can admit an earlier large
+file that blocks later small ones. Read ``bytes_fit`` and ``tokens_used``.
 
 | condition | budget | files_fit | bytes_fit | tokens_used |
 |-----------|--------|-----------|-----------|-------------|
@@ -171,6 +182,42 @@ No hypotheses defined in hypotheses.yaml.
 {% endfor %}
 {% endfor %}
 # Run-wide results
+
+## Descriptive paired differences (post-hoc, not the pre-registered rule)
+
+{% if paired %}
+Added after seeing the results; does **not** change any verdict. Each row is
+the mean over repositories of (condition A − condition B) on per-repository
+mean tokens/KB, with a cluster-bootstrap CI (n_boot={{ paired_meta.get("n_boot", "n/a") }},
+seed={{ paired_meta.get("seed", "n/a") }}). ``repos_better`` counts repositories
+where the difference is negative (fewer tokens/KB for A).
+{% if paired_meta.get("note") %}
+
+_{{ paired_meta.note }}_
+{% endif %}
+
+| eval set | K | contrast | mean | CI low | CI high | n_repos | repos_better | repos_worse | repos_tie |
+|----------|---|----------|------|--------|---------|---------|--------------|-------------|-----------|
+{% for r in paired %}
+| {{ r.eval_set }} | {{ r.k }} | {{ r.contrast }} | {{ "%.4f"|format(r.mean) }} | {{ "%.4f"|format(r.ci_low) }} | {{ "%.4f"|format(r.ci_high) }} | {{ r.n_repos }} | {{ r.repos_better }} | {{ r.repos_worse }} | {{ r.repos_tie }} |
+{% endfor %}
+{% else %}
+Not run (``toklab analyze paired --run <hash>``).
+{% endif %}
+
+## Intrinsic baselines (not part of the 2×2)
+
+{% if baselines.ran %}
+{{ baselines.note }} Conditions: C1 (GPT-2), C2 (code tokenizer), C6 (byte-level).
+
+| condition | status | n_files | roundtrip_fail | mean tokens/KB | CI low | CI high | n_repos |
+|-----------|--------|---------|----------------|----------------|--------|---------|---------|
+{% for r in baselines.rows %}
+| {{ r.condition }} | **{{ r.status }}** | {{ r.n_files if r.n_files is not none else "—" }} | {{ r.n_roundtrip_fail }} | {% if r.estimate is none %}—{% else %}{{ "%.4f"|format(r.estimate) }}{% endif %} | {% if r.ci_low is none %}—{% else %}{{ "%.4f"|format(r.ci_low) }}{% endif %} | {% if r.ci_high is none %}—{% else %}{{ "%.4f"|format(r.ci_high) }}{% endif %} | {{ r.n_repos if r.n_repos is not none else "—" }} |
+{% endfor %}
+{% else %}
+Intrinsic baselines not run (``toklab run baselines``).
+{% endif %}
 
 ## Systems cost{% if k_star is not none %} (K*={{ k_star }}){% endif %}
 
@@ -214,10 +261,25 @@ primary eval set (`{{ primary_eval_set }}`); C3 vs C2, C5 vs C4.
 
 ## Vocabulary drift (drift_holdout repositories)
 
-{% if drift_meta and drift_meta.get("proportions") %}Proportions p ∈ {{ "{" }}{{ drift_meta.proportions|join(", ") }}{{ "}" }} (% of each file's eligible definitions renamed with their uses). {% endif %}Baselines C2/C4; STATIC = frozen adapt
-vocab{% if drift_meta %} (K={{ drift_meta.k_static }}; drift texts: {{ drift_meta.get("drift_texts", "renamed in memory (apply_drift)") }}){% endif %};
-REFRESH = append-only new entries from a small drifted v1 sample (old ids
-unchanged). BPB only for gate-valid fine-tuned variants.
+{% if drift_meta and drift_meta.get("proportions") %}Proportions p ∈ {{ "{" }}{{ drift_meta.proportions|join(", ") }}{{ "}" }} (% of each file's eligible definitions renamed with their uses). {% endif %}
+The drift_holdout files keep their **original** names (they are not
+lexicon-renamed like ``test`` / ``adapt``), so the drift baseline is not
+comparable to ``test``. Baselines C2/C4; STATIC = frozen adapt
+vocab{% if drift_meta %} (K={{ drift_meta.k_static }}; drift texts: {{ drift_meta.get("drift_texts", "renamed in memory (apply_drift)") }}){% endif %}.
+REFRESH = append-only new entries from a drifted v1 sample of
+{% if drift_meta and drift_meta.get("v1_sample_size") is not none %}{{ drift_meta.v1_sample_size }} file{% if drift_meta.v1_sample_size != 1 %}s{% endif %}{% else %}recorded size{% endif %}{% if drift_meta and drift_meta.get("k_refresh") is not none %}, adding up to {{ drift_meta.k_refresh }} entries{% endif %} (old ids unchanged). BPB only for gate-valid fine-tuned variants.
+This does not show robustness to large-scale renaming.
+
+{% if drift_rename_shares %}
+Renamed shares on the drift_holdout texts (generated from the rename map and
+the ``drift/p*`` files):
+
+| p | files touched | renamed definitions | share of eligible defs | renamed occurrences | share of all identifier occurrences |
+|---|---------------|---------------------|------------------------|---------------------|-------------------------------------|
+{% for r in drift_rename_shares %}
+| {{ r.proportion }} | {{ r.files_touched }}/{{ r.n_files }} | {{ r.renamed_definitions }}{% if r.eligible_definitions is defined and r.eligible_definitions %} / {{ r.eligible_definitions }}{% endif %} | {% if r.definition_fraction is none or r.definition_fraction != r.definition_fraction %}—{% else %}{{ "%.4f"|format(r.definition_fraction) }}{% endif %} | {{ r.renamed_occurrences }}{% if r.total_occurrences is defined %} / {{ r.total_occurrences }}{% endif %} | {% if r.occurrence_fraction is none or r.occurrence_fraction != r.occurrence_fraction %}—{% else %}{{ "%.4f"|format(r.occurrence_fraction) }}{% endif %} |
+{% endfor %}
+{% endif %}
 
 | p | variant | baseline | n_tok | n_base | reduction | coverage | bpb | \|V\| |
 |---|---------|----------|-------|--------|-----------|----------|-----|------|

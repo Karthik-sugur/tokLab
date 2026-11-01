@@ -10,12 +10,12 @@ exactly, and measures tokens per KB of original source with
 repository-level confidence intervals. Results, including negative ones, are
 written to a generated report; nothing in this README is a result.
 
-**Results:** see the generated report of the demo run,
-[`runs/<demo_run>/report.md`](runs/) (hash in
-[`configs/demo.yaml`](configs/demo.yaml)), or its static copy
-`demo_assets/report.html`. Neither is committed (`runs/` and `demo_assets/`
-are git-ignored); they are produced by the commands below or shipped in
-`demo_bundle.zip`.
+**Results snapshot:** a copy of the demo run's generated report is kept at
+[`docs/results/report_a63c8847.md`](docs/results/report_a63c8847.md)
+(labelled inside as a snapshot of that run; not re-computed here). The live
+report under `runs/<hash>/` and `demo_assets/report.html` are git-ignored and
+come from the pipeline or `demo_bundle.zip` (hash in
+[`configs/demo.yaml`](configs/demo.yaml)).
 
 ## Install
 
@@ -148,10 +148,10 @@ _Copied verbatim from `runs/a63c884760b93db98798e5e5e6dadba5be8653ae956b66cd4ef9
 - Alpha-equivalence is not runtime equivalence: the synthetic renamer checks that renamed code has the same syntax tree up to consistent identifier renaming; it does not prove the code behaves the same (string-based lookups such as getattr, reflection or external APIs can break).
 - K chosen on val: K*=16384 minimises C3 tokens/KB on the val split (440 files), chosen with C3 only (docs/decisions/005-k-selection.md). Hypotheses are judged at K* only; other K values are descriptive. Selecting K on val still tunes the setup to this corpus.
 - Selection uses min_freq=1 and min_repos=1. With min_repos=1, entries frequent in a single adapt repository can be selected: they inflate gains on test_inorg (same repositories) and overfit relative to test (new repositories).
-- Quality not measured: no fine-tuning was run, so there is no bits-per-byte result; C3/C5 add untrained embedding rows and any quality figure for them is suppressed (systems rows tagged quality_valid=False).
+- Quality not measured: no fine-tuning was run, so there is no bits-per-byte result; C3/C5 add untrained embedding rows and any quality figure for them is suppressed.
 - 5 file(s) excluded at ingest for every condition because the base tokenizer cannot round-trip them (NFC normalisation): pydantic/tests/test_networks.py (NFC normalizer: U+F96E CJK compatibility ideograph -> U+8449 (base tokenizer, C2 fails)); black/tests/data/cases/docstring.py (NFC normalizer: U+2001 EM QUAD -> U+2003 EM SPACE (base tokenizer, C2 fails)); pytest/testing/io/test_terminalwriter.py (NFC normalizer: 'e' + U+0301 combining acute -> U+00E9 (base tokenizer, C2 fails)); aiohttp/tests/test_http_parser.py (NFC normalizer: U+212A KELVIN SIGN -> 'K' (base tokenizer, C2 fails)); aiohttp/tests/test_multipart_helpers.py (NFC normalizer: 'a' + U+0308 combining diaeresis -> U+00E4 (base tokenizer, C2 fails)).
 - FLOPs / KV / param overhead figures are ESTIMATE labels, not measured.
-- Drift REFRESH may append tokens mined from a small drifted v1 sample; old adapted ids stay unchanged (append-only). Drift BPB is reported only for gate-valid fine-tuned variants; otherwise marked not run.
+- Drift REFRESH may append tokens mined from a drifted v1 sample (size recorded in drift_meta); old adapted ids stay unchanged (append-only). Drift BPB is reported only for gate-valid fine-tuned variants; otherwise marked not run. This does not show robustness to large-scale renaming.
 - All evaluated conditions passed fidelity on this run.
 <!-- limitations:end -->
 

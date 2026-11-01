@@ -81,21 +81,34 @@ def run_baselines(
     fidelity: dict[str, FidelityReport] = {}
     ci_rows: list[tuple[str, BootstrapCI]] = []
 
+    ci_table_rows: list[dict[str, Any]] = []
     for condition in conditions:
         tok = get_tokenizer(condition, cfg)
         report = check_roundtrip(tok, files, texts=texts)
         fidelity[condition] = report
-        if report.n_roundtrip_fail:
-            raise RuntimeError(
-                f"{condition} failed round-trip on {report.n_roundtrip_fail} "
-                f"file(s): {report.failures[:3]}"
-            )
-
+        # Continue on round-trip failure: report shows INVALID; metrics still
+        # measured so the section can list tokens/KB alongside the failure.
         df = measure_files(tok, files, texts=texts, condition=condition)
         all_metrics.append(df)
         by_repo = _tpk_by_repo(files, df, condition)
         ci = cluster_bootstrap_ci(by_repo, seed=seed, n_boot=n_boot)
         ci_rows.append((condition, ci))
+        valid = report.n_roundtrip_fail == 0
+        ci_table_rows.append(
+            {
+                "condition": condition,
+                "metric": "tokens_per_kb",
+                "estimate": ci.estimate,
+                "ci_low": ci.low,
+                "ci_high": ci.high,
+                "n_repos": ci.n_repos,
+                "n_boot": ci.n_boot,
+                "seed": ci.seed,
+                "alpha": ci.alpha,
+                "valid": valid,
+                "status": "OK" if valid else "INVALID",
+            }
+        )
 
     metrics = pd.concat(all_metrics, ignore_index=True)
     write_metrics_parquet(metrics, out_dir / "intrinsic_metrics.parquet")
@@ -110,11 +123,21 @@ def run_baselines(
             "n_orig_parsed": r.n_orig_parsed,
             "n_reparse_ok": r.n_reparse_ok,
             "n_reparse_fail": r.n_reparse_fail,
+            "valid": r.n_roundtrip_fail == 0,
+            "status": "OK" if r.n_roundtrip_fail == 0 else "INVALID",
         }
         for name, r in fidelity.items()
     ]
     pd.DataFrame(fid_rows).to_parquet(out_dir / "fidelity.parquet", index=False)
+    pd.DataFrame(ci_table_rows).to_parquet(
+        out_dir / "token_efficiency_ci.parquet", index=False
+    )
 
     table = format_ci_table(ci_rows)
     (out_dir / "baselines_ci_table.txt").write_text(table + "\n", encoding="utf-8")
+    failed = [c for c, r in fidelity.items() if r.n_roundtrip_fail]
+    if failed:
+        table += "\n# round-trip failures (shown, not suppressed): " + ", ".join(
+            f"{c}={fidelity[c].n_roundtrip_fail}" for c in failed
+        )
     return table, fidelity, ci_rows

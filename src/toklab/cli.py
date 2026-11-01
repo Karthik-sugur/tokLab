@@ -10,8 +10,10 @@ from toklab import __version__
 app = typer.Typer(help="TokLab research workbench")
 data_app = typer.Typer(help="Dataset ingestion and splits")
 run_app = typer.Typer(help="Experiment runners")
+analyze_app = typer.Typer(help="Post-hoc analyses of stored run metrics")
 app.add_typer(data_app, name="data")
 app.add_typer(run_app, name="run")
+app.add_typer(analyze_app, name="analyze")
 
 
 @app.callback()
@@ -418,6 +420,40 @@ def report_cmd(
 
         html_path = write_report_html(path, out)
         typer.echo(f"report_html={html_path.resolve()}")
+
+
+@analyze_app.command("paired")
+def analyze_paired_cmd(
+    run: Annotated[
+        str,
+        typer.Option("--run", help="Config hash (directory under runs/)"),
+    ],
+    runs_root: Annotated[
+        Path,
+        typer.Option("--runs-root", help="Runs root directory"),
+    ] = Path("runs"),
+    manifest: Annotated[
+        Path,
+        typer.Option(
+            "--manifest",
+            help="Manifest with file_id→repo mapping",
+        ),
+    ] = Path("data/processed/manifest.parquet"),
+    seed: Annotated[int, typer.Option("--seed")] = 0,
+    n_boot: Annotated[int, typer.Option("--n-boot")] = 1000,
+) -> None:
+    """Repo-weighted paired diffs from stored per-file metrics (post-hoc)."""
+    from toklab.evaluation.paired import run_paired_for_experiment
+
+    run_dir = runs_root / run
+    if not run_dir.is_dir():
+        raise typer.BadParameter(f"run directory not found: {run_dir}")
+    if not manifest.is_file():
+        raise typer.BadParameter(f"manifest not found: {manifest}")
+    path = run_paired_for_experiment(
+        run_dir, manifest=manifest, seed=seed, n_boot=n_boot
+    )
+    typer.echo(f"paired={path.resolve()}")
 
 
 @run_app.command("baselines")
