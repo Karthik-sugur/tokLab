@@ -259,6 +259,45 @@ def interaction_note(effects: pd.DataFrame | None, k: int | None) -> str:
     return text
 
 
+def effects_averaging_note(
+    effects: pd.DataFrame | None,
+    efficiency: pd.DataFrame | None,
+    k: int | None,
+) -> str:
+    """How the 2×2 columns are averaged (matches ``stats.factorial_analysis``)."""
+    if effects is None or effects.empty:
+        return ""
+    row = _pick_row(effects, k)
+    if row is None:
+        return ""
+    k_row = int(row["k"])
+    n_repos = ""
+    if efficiency is not None and not efficiency.empty and "n_repos" in efficiency:
+        sub = efficiency
+        if "k" in sub.columns:
+            sub = sub[sub["k"] == k_row]
+        if not sub.empty:
+            n_repos = f"{int(sub['n_repos'].iloc[0])} "
+    c2, c3, c4, c5 = (float(row[c]) for c in ("c2", "c3", "c4", "c5"))
+    cell_d, cell_s = c3 - c2, c4 - c2
+    cell_i = (c5 - c4) - (c3 - c2)
+    return (
+        "C2–C5 are the cell means of the Token efficiency table: the mean over "
+        "all files, each file weighted equally. effect_S (C4−C2), effect_D "
+        "(C3−C2) and I = (C5−C4) − (C3−C2) are the mean over the "
+        f"{n_repos}repositories of per-repository differences of repository "
+        "means, each repository weighted equally, with cluster-bootstrap CIs "
+        "over repositories. They therefore differ from differences of the "
+        f"printed cell means: at K={k_row} the cell means give "
+        f"D={cell_d:+.4f}, S={cell_s:+.4f}, I={cell_i:+.4f}; the table shows "
+        f"D={float(row['effect_d']):+.4f}, S={float(row['effect_s']):+.4f}, "
+        f"I={float(row['interaction']):+.4f}. The decision-rule column uses the "
+        "same repository-weighted paired difference (C5 minus the better of "
+        "C3/C4, the better one picked by the cell means) and is True only if "
+        "that difference and its whole CI are below zero."
+    )
+
+
 def _with_k(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     for r in records:
         k = r.get("k")
@@ -335,6 +374,9 @@ def _eval_set_section(
         "invalid_conditions": sorted(invalid),
         "efficiency": eff_rows,
         "effects": effect_rows,
+        "effects_note": effects_averaging_note(
+            effects, efficiency, k_judged if k_judged is not None else k_star
+        ),
         "interaction_note": (
             "" if hypotheses_blocked else interaction_note(effects, k_judged)
         ),

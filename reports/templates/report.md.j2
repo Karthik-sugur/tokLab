@@ -138,6 +138,10 @@ Pre-registered decision rule (quoted from configs/hypotheses.yaml): "{{ decision
 {% else %}
 | — | not run | | | | | | | | |
 {% endfor %}
+{% if s.effects_note %}
+
+**How these columns are averaged:** {{ s.effects_note }}
+{% endif %}
 
 ## Context utilisation [{{ s.name }}]
 
