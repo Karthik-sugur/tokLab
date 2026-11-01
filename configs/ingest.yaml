@@ -36,6 +36,12 @@ split_ratios:
   test: 0.20
   drift_holdout: 0.10
 
+# File-level "test_inorg" evaluation set: this seeded fraction of the FILES
+# of every adapt repository is held out (new files in a known codebase).
+# Held-out files are not in the adapt split, so vocabulary mining never sees
+# them; duplicate clusters move as a unit. See docs/decisions/004-inorg-eval.md.
+inorg_holdout_fraction: 0.20
+
 # Minimum repos per split (adapt has no floor). Fail if impossible.
 min_repos_per_split:
   val: 3

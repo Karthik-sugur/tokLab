@@ -23,8 +23,19 @@ class DataConfig(BaseModel):
     repos_dir: Path
     manifest_path: Path
     synthetic_dir: Path | None = None
+    # Primary evaluation set (hypothesis verdicts use it first).
     eval_split: str = "test"
+    # All evaluation sets reported; defaults to ``[eval_split]``.
+    eval_splits: list[str] | None = None
     adapt_split: str = "adapt"
+
+    def resolved_eval_splits(self) -> list[str]:
+        splits = list(self.eval_splits or [self.eval_split])
+        if self.eval_split not in splits:
+            splits.insert(0, self.eval_split)
+        if self.adapt_split in splits:
+            raise ValueError("the adapt split cannot be an evaluation set")
+        return splits
 
 
 class VocabConfig(BaseModel):

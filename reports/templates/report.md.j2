@@ -3,12 +3,16 @@
 **config_hash:** `{{ config_hash }}`  
 **run_dir:** `{{ run_dir }}`
 
-{% if any_invalid %}
-> **INVALID:** condition(s) {{ invalid_conditions | join(", ") }} failed
-> fidelity (lossless round-trip). They are marked INVALID and **excluded
-> from hypothesis claims**.
-{% endif %}
+{% if run_label %}
+> **Run status: {{ run_label.label }}.**{% if run_label.note %} {{ run_label.note }}{% endif %}
 
+{% endif %}
+{% for s in eval_sets if s.any_invalid %}
+> **INVALID ({{ s.name }}):** condition(s) {{ s.invalid_conditions | join(", ") }} failed
+> fidelity (lossless round-trip) on eval set `{{ s.name }}`. They are marked
+> INVALID and **excluded from hypothesis claims** for that set.
+
+{% endfor %}
 ## Setup
 
 | Field | Value |
@@ -24,56 +28,89 @@
 | model | {{ config.get("model", {}).get("model_name", "n/a") }} |
 
 Library versions: {% for k, v in (env.library_versions or {}).items() %}{{ k }}={{ v }}{% if not loop.last %}, {% endif %}{% endfor %}{{ "\n" }}
-## Fidelity
+## Evaluation sets
+
+| eval set | role | description | status |
+|----------|------|-------------|--------|
+{% for s in eval_sets %}
+| `{{ s.name }}` | {% if s.primary %}primary{% else %}secondary{% endif %} | {{ s.label }} | {% if s.ran %}{{ s.status_note or "run" }}{% else %}{{ s.status_note }}{% endif %} |
+{% endfor %}
+
+{% for s in eval_sets %}
+# Eval set `{{ s.name }}`: {{ s.label }}
+
+{% if not s.ran %}
+Not run for this evaluation set ({{ s.status_note }}).
+
+{% else %}
+## Fidelity [{{ s.name }}]
 
 | condition | n_files | roundtrip_ok | roundtrip_fail | status |
 |-----------|---------|--------------|----------------|--------|
-{% for r in fidelity %}
+{% for r in s.fidelity %}
 | {{ r.condition }} | {{ r.n_files }} | {{ r.n_roundtrip_ok }} | {{ r.n_roundtrip_fail }} | **{{ r.status }}** |
 {% else %}
 | — | — | — | — | not run |
 {% endfor %}
 
-## Token efficiency (tokens/KB, lower is better)
+## Token efficiency [{{ s.name }}] (tokens/KB, lower is better)
 
 Cluster-bootstrap mean with CI. Rows for INVALID conditions are listed but
 excluded from claims.
 
 | condition | mean | CI low | CI high | n_repos | notes |
 |-----------|------|--------|---------|---------|-------|
-{% for r in efficiency %}
+{% for r in s.efficiency %}
 | {{ r.condition }} | {{ "%.4f"|format(r.estimate) }} | {{ "%.4f"|format(r.ci_low) }} | {{ "%.4f"|format(r.ci_high) }} | {{ r.n_repos }} | {% if r.excluded %}EXCLUDED (INVALID){% else %}—{% endif %} |
 {% else %}
 | — | — | — | — | — | not run |
 {% endfor %}
 
-## 2×2 interaction (structure × domain)
+## 2×2 interaction [{{ s.name }}] (structure × domain)
 
 Decision rule: {{ decision_rule }}
 
-{% if interaction_note %}
-**Interaction summary:** {{ interaction_note }}
+{% if s.interaction_note %}
+**Interaction summary:** {{ s.interaction_note }}
 {% endif %}
 
 | k | C2 | C3 | C4 | C5 | effect_S | effect_D | I | I CI | C5>best |
 |---|----|----|----|----|----------|----------|---|------|---------|
-{% for e in effects %}
+{% for e in s.effects %}
 | {{ e.k }} | {{ "%.2f"|format(e.c2) }} | {{ "%.2f"|format(e.c3) }} | {{ "%.2f"|format(e.c4) }} | {{ "%.2f"|format(e.c5) }} | {{ "%.2f"|format(e.effect_s) }} | {{ "%.2f"|format(e.effect_d) }} | {{ "%.4f"|format(e.interaction) }} | [{{ "%.3f"|format(e.interaction_low) }}, {{ "%.3f"|format(e.interaction_high) }}] | {{ e.combined_beats_either }} |
 {% else %}
 | — | not run | | | | | | | | |
 {% endfor %}
 
-## Context utilisation
+## Context utilisation [{{ s.name }}]
 
 Greedy first-fit packing in fixed `file_id` order.
 
 | condition | budget | files_fit | bytes_fit | tokens_used |
 |-----------|--------|-----------|-----------|-------------|
-{% for r in context %}
+{% for r in s.context %}
 | {{ r.condition }} | {{ r.budget_tokens }} | {{ r.files_fit }} | {{ r.bytes_fit }} | {{ r.tokens_used }} |
 {% else %}
 | — | — | — | — | not run |
 {% endfor %}
+
+## Hypotheses verdicts [{{ s.name }}]{% if s.primary %} (primary){% else %} (secondary){% endif %}
+
+{% for h in s.hypotheses %}
+### {{ h.id }} [{{ s.name }}] — {{ h.verdict }}
+
+{{ h.claim }}
+
+- contrast: {{ h.contrast }}
+- verdict: **{{ h.verdict }}**
+- reason: {{ h.reason }}
+
+{% else %}
+No hypotheses evaluated.
+{% endfor %}
+{% endif %}
+{% endfor %}
+# Run-wide results
 
 ## Systems cost
 
@@ -99,7 +136,7 @@ All figures below are labelled **ESTIMATE** (not measured hardware counters).
 | — | — | — | — | — | not run |
 {% endfor %}
 
-## Vocabulary drift
+## Vocabulary drift (drift_holdout repositories)
 
 Proportions ``p ∈ {0, 10, 25, 50}``. Baselines C2/C4; STATIC = frozen adapt
 vocab; REFRESH = append-only new entries from a small drifted v1 sample
@@ -111,21 +148,6 @@ vocab; REFRESH = append-only new entries from a small drifted v1 sample
 | {{ r.proportion }} | {{ r.variant }} | {{ r.baseline }} | {{ r.n_tokens }} | {{ r.n_tokens_baseline }} | {{ "%.3f"|format(r.token_reduction) if r.token_reduction == r.token_reduction else "nan" }} | {{ "%.3f"|format(r.coverage) if r.coverage == r.coverage else "nan" }} | {% if r.bpb is none %}{{ r.bpb_status }}{% else %}{{ "%.4f"|format(r.bpb) }}{% endif %} | {{ r.n_vocab }} |
 {% else %}
 | — | not run | | | | | | | |
-{% endfor %}
-
-## Hypotheses verdicts
-
-{% for h in hypotheses %}
-### {{ h.id }} — {{ h.verdict }}
-
-{{ h.claim }}
-
-- contrast: {{ h.contrast }}
-- verdict: **{{ h.verdict }}**
-- reason: {{ h.reason }}
-
-{% else %}
-No hypotheses evaluated.
 {% endfor %}
 
 ## Limitations

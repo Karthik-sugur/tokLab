@@ -171,6 +171,7 @@ def data_synth(
     typer.echo(
         "synth "
         f"adapt_files={summary['adapt_files']} "
+        f"test_inorg_files={summary['test_inorg_files']} "
         f"val_files={summary['val_files']} "
         f"test_files={summary['test_files']} "
         f"drift_holdout_files={summary['drift_holdout_files']} "

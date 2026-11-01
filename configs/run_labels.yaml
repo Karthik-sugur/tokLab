@@ -1,0 +1,10 @@
+# Human labels shown at the top of a run's report (keyed by full config hash).
+# Labels never change a run's artifacts or numbers.
+runs:
+  0250decc37f179b589bec3bf9f1f190b84bdc77f12fad58d10b6879bae319a0f:
+    label: preliminary v1
+    note: >-
+      Evaluated only the repo-level test set, with K in {0, 8}, on
+      data/repos (original sources; the synthetic layer was not read by the
+      runner). Superseded by the test + test_inorg setup; see
+      docs/decisions/004-inorg-eval.md.

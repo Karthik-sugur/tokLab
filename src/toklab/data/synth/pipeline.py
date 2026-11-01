@@ -1,6 +1,6 @@
 """Orchestrate the synthetic enterprise layer over every split of a manifest.
 
-* adapt / val / test: renamed with ``lexicon_adapt``
+* adapt / test_inorg / val / test: renamed with ``lexicon_adapt``
 * drift_holdout: drift variants p{0,10,25,50} with ``lexicon_drift`` only
 """
 
@@ -20,7 +20,7 @@ from toklab.data.synth.drift import DRIFT_PROPORTIONS, apply_drift
 from toklab.data.synth.lexicon import EnterpriseLexicon
 from toklab.data.synth.rename import rename_file_with_lexicon
 
-ADAPT_LEXICON_SPLITS = ("adapt", "val", "test")
+ADAPT_LEXICON_SPLITS = ("adapt", "test_inorg", "val", "test")
 DRIFT_SPLIT = "drift_holdout"
 SYNTH_MANIFEST = "synth_manifest.parquet"
 
@@ -58,7 +58,7 @@ def run_synth(
     """Apply the synthetic layer to all splits.
 
     Writes:
-      ``out/{adapt,val,test}/{repo}/{path}`` (lexicon_adapt)
+      ``out/{adapt,test_inorg,val,test}/{repo}/{path}`` (lexicon_adapt)
       ``out/drift/p{0,10,25,50}/{repo}/{path}`` (lexicon_drift)
       ``out/rename_map.json``, ``out/synth_manifest.parquet``,
       ``out/lexicon_meta.json``, ``out/synth_summary.json``
@@ -181,6 +181,7 @@ def run_synth(
         "subset": only is not None,
         "variants": {k: _variant_summary(v) for k, v in by_variant.items()},
         "adapt_files": len(maps["adapt"]),
+        "test_inorg_files": len(maps["test_inorg"]),
         "val_files": len(maps["val"]),
         "test_files": len(maps["test"]),
         "drift_holdout_files": len(drift_files),

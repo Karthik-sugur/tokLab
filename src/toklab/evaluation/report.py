@@ -9,16 +9,61 @@ import pandas as pd
 import yaml
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
+EVAL_SET_LABELS: dict[str, str] = {
+    "test": (
+        "new codebase: held-out repositories (repo-level split, never "
+        "seen by vocabulary mining)"
+    ),
+    "test_inorg": (
+        "new files in known codebases: seeded fraction of files held out "
+        "from each adapt repository (excluded from vocabulary mining)"
+    ),
+}
+DEFAULT_EVAL_SETS = ("test", "test_inorg")
+
+
+def _repo_root_candidates(*parts: str) -> list[Path]:
+    return [
+        Path.cwd().joinpath(*parts),
+        Path(__file__).resolve().parents[3].joinpath(*parts),
+    ]
+
 
 def _template_dir() -> Path:
-    candidates = [
-        Path.cwd() / "reports" / "templates",
-        Path(__file__).resolve().parents[3] / "reports" / "templates",
-    ]
+    candidates = _repo_root_candidates("reports", "templates")
     for path in candidates:
         if path.is_dir():
             return path
     return candidates[0]
+
+
+def load_run_label(config_hash: str, path: Path | None = None) -> dict[str, str]:
+    """Return ``{"label", "note"}`` for ``config_hash`` from run_labels.yaml."""
+    paths = [path] if path is not None else _repo_root_candidates(
+        "configs", "run_labels.yaml"
+    )
+    for p in paths:
+        if p.is_file():
+            data = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+            entry = (data.get("runs") or {}).get(config_hash)
+            if isinstance(entry, dict) and entry.get("label"):
+                return {
+                    "label": str(entry["label"]),
+                    "note": str(entry.get("note", "")).strip(),
+                }
+            return {}
+    return {}
+
+
+def _eval_set_frame(
+    df: pd.DataFrame | None, name: str, legacy_set: str
+) -> pd.DataFrame | None:
+    """Rows for one eval set; runs without ``eval_set`` are one legacy set."""
+    if df is None:
+        return None
+    if "eval_set" not in df.columns:
+        return df if name == legacy_set else None
+    return df[df["eval_set"] == name].reset_index(drop=True)
 
 
 def _read_parquet(run_dir: Path, name: str) -> pd.DataFrame | None:
@@ -193,24 +238,37 @@ def _df_records(df: pd.DataFrame | None) -> list[dict[str, Any]]:
     return df.to_dict(orient="records")
 
 
-def build_report_context(
-    run_dir: Path,
-    *,
-    hypotheses_path: Path,
-) -> dict[str, Any]:
-    """Assemble template context from parquet/json in ``run_dir``."""
-    run_dir = Path(run_dir)
-    env = _read_json(run_dir, "env.json")
-    cfg = _read_json(run_dir, "config.json")
-    status = _read_json(run_dir, "status.json")
-    fidelity = _read_parquet(run_dir, "fidelity.parquet")
-    efficiency = _read_parquet(run_dir, "token_efficiency_ci.parquet")
-    effects = _read_parquet(run_dir, "factorial_effects.parquet")
-    context = _read_parquet(run_dir, "context_utilisation.parquet")
-    systems = _read_parquet(run_dir, "systems.parquet")
-    vocab_cost = _read_parquet(run_dir, "vocab_cost.parquet")
-    drift = _read_parquet(run_dir, "drift_metrics.parquet")
+def _interaction_note(effects: pd.DataFrame | None) -> str:
+    if effects is None or effects.empty:
+        return ""
+    iest = float(effects.sort_values("k").iloc[-1]["interaction"])
+    # On tokens/KB (lower better): positive I means sub-additive gains.
+    if iest > 0:
+        return (
+            "Interaction point estimate is positive on tokens/KB "
+            f"(I={iest:.4f}): combined gains are worse than additive "
+            "independence expectation (negative result for synergy)."
+        )
+    if iest < 0:
+        return (
+            "Interaction point estimate is negative on tokens/KB "
+            f"(I={iest:.4f}): combined beats additive independence "
+            "expectation on the point estimate."
+        )
+    return "Interaction point estimate is exactly zero."
 
+
+def _eval_set_section(
+    name: str,
+    *,
+    primary: bool,
+    fidelity: pd.DataFrame | None,
+    efficiency: pd.DataFrame | None,
+    effects: pd.DataFrame | None,
+    context: pd.DataFrame | None,
+    hypo: dict[str, Any],
+    status_note: str,
+) -> dict[str, Any]:
     invalid: set[str] = set()
     fidelity_rows: list[dict[str, Any]] = []
     if fidelity is not None:
@@ -243,57 +301,112 @@ def build_report_context(
                 }
             )
 
-    interaction_negative = False
-    interaction_note = ""
-    effects_rows = _df_records(effects)
-    if effects is not None and not effects.empty:
-        last = effects.sort_values("k").iloc[-1]
-        iest = float(last["interaction"])
-        interaction_negative = iest > 0
-        # On tokens/KB (lower better): positive I means structure+domain
-        # interaction increases tokens relative to additivity of reductions
-        # i.e. sub-additive gains. Report plainly either way.
-        if iest > 0:
-            interaction_note = (
-                "Interaction point estimate is positive on tokens/KB "
-                f"(I={iest:.4f}): combined gains are worse than additive "
-                "independence expectation (negative result for synergy)."
-            )
-        elif iest < 0:
-            interaction_note = (
-                "Interaction point estimate is negative on tokens/KB "
-                f"(I={iest:.4f}): combined beats additive independence "
-                "expectation on the point estimate."
-            )
-        else:
-            interaction_note = "Interaction point estimate is exactly zero."
-
-    hypo = _load_hypotheses(hypotheses_path)
     verdicts = evaluate_hypotheses(effects, hypo, invalid_conditions=invalid)
+    ran = any(
+        df is not None and not df.empty
+        for df in (fidelity, efficiency, effects, context)
+    )
+    return {
+        "name": name,
+        "label": EVAL_SET_LABELS.get(name, name),
+        "primary": primary,
+        "ran": ran,
+        "status_note": status_note or ("" if ran else "not run"),
+        "fidelity": fidelity_rows,
+        "any_invalid": bool(invalid),
+        "invalid_conditions": sorted(invalid),
+        "efficiency": eff_rows,
+        "effects": _df_records(effects),
+        "interaction_note": _interaction_note(effects),
+        "context": _df_records(context),
+        "hypotheses": verdicts,
+    }
 
-    any_invalid = bool(invalid)
+
+def _eval_set_names(cfg: dict[str, Any]) -> tuple[str, list[str]]:
+    data = cfg.get("data") or {}
+    primary = str(data.get("eval_split") or "test")
+    names = [primary, *(data.get("eval_splits") or []), *DEFAULT_EVAL_SETS]
+    ordered: list[str] = []
+    for n in names:
+        if n not in ordered:
+            ordered.append(str(n))
+    return primary, ordered
+
+
+def build_report_context(
+    run_dir: Path,
+    *,
+    hypotheses_path: Path,
+    run_labels_path: Path | None = None,
+) -> dict[str, Any]:
+    """Assemble template context from parquet/json in ``run_dir``.
+
+    Fidelity, efficiency, 2x2 and context tables are reported per evaluation
+    set (``test`` = new codebase, ``test_inorg`` = new files in a known
+    codebase). Runs without an ``eval_set`` column are treated as a single
+    set named by ``data.eval_split``.
+    """
+    run_dir = Path(run_dir)
+    env = _read_json(run_dir, "env.json")
+    cfg = _read_json(run_dir, "config.json")
+    status = _read_json(run_dir, "status.json")
+    fidelity = _read_parquet(run_dir, "fidelity.parquet")
+    efficiency = _read_parquet(run_dir, "token_efficiency_ci.parquet")
+    effects = _read_parquet(run_dir, "factorial_effects.parquet")
+    context = _read_parquet(run_dir, "context_utilisation.parquet")
+    systems = _read_parquet(run_dir, "systems.parquet")
+    vocab_cost = _read_parquet(run_dir, "vocab_cost.parquet")
+    drift = _read_parquet(run_dir, "drift_metrics.parquet")
+    hypo = _load_hypotheses(hypotheses_path)
+
+    primary, names = _eval_set_names(cfg)
+    status_notes = status.get("eval_sets") or {}
+    sections = [
+        _eval_set_section(
+            name,
+            primary=name == primary,
+            fidelity=_eval_set_frame(fidelity, name, primary),
+            efficiency=_eval_set_frame(efficiency, name, primary),
+            effects=_eval_set_frame(effects, name, primary),
+            context=_eval_set_frame(context, name, primary),
+            hypo=hypo,
+            status_note=str(status_notes.get(name, "")),
+        )
+        for name in names
+    ]
+    any_invalid = any(s["any_invalid"] for s in sections)
+    config_hash = status.get("config_hash") or run_dir.name
+    vocab = cfg.get("vocab") or {}
+    min_repos = vocab.get("min_repos", "n/a")
+    min_freq = vocab.get("min_freq", "n/a")
 
     return {
         "run_dir": str(run_dir.resolve()),
-        "config_hash": status.get("config_hash") or run_dir.name,
+        "config_hash": config_hash,
         "name": status.get("name") or cfg.get("name", ""),
+        "run_label": load_run_label(str(config_hash), run_labels_path),
         "env": env,
         "config": cfg,
-        "fidelity": fidelity_rows,
+        "primary_eval_set": primary,
+        "eval_sets": sections,
         "any_invalid": any_invalid,
-        "invalid_conditions": sorted(invalid),
-        "efficiency": eff_rows,
-        "effects": effects_rows,
-        "interaction_note": interaction_note,
-        "interaction_negative_synergy": interaction_negative,
-        "context": _df_records(context),
         "systems": _df_records(systems),
         "vocab_cost": _df_records(vocab_cost),
         "drift": _df_records(drift),
-        "hypotheses": verdicts,
         "decision_rule": str(hypo.get("decision_rule", "")).strip(),
         "limitations": [
-            "Vocabulary mined from the adapt split only; test never used for mining.",
+            "Vocabulary mined from the adapt split only; test and test_inorg "
+            "files are never used for mining.",
+            "test_inorg is a FILE-level hold-out inside adapt repositories, an "
+            "explicit exception to repository-level splitting: it measures reuse "
+            "of a known codebase's names, not generalisation to new codebases. "
+            f"Hypothesis claims use the primary set ({primary}) first.",
+            f"Selection uses min_freq={min_freq} and min_repos={min_repos}. With "
+            "min_repos=1, entries frequent in a single adapt repository can be "
+            "selected: they inflate gains on test_inorg (same repositories) and "
+            "overfit relative to test (new repositories). K was not chosen on "
+            "the val split in this run.",
             "Quality / BPB suppressed for conditions with untrained new vocab rows "
             "(C3/C5): systems rows tagged quality_valid=False when present.",
             "FLOPs / KV / param overhead figures are ESTIMATE labels, not measured.",
@@ -304,7 +417,7 @@ def build_report_context(
             "Fixture-scale corpora: do not generalise beyond the evaluated repos.",
             (
                 "Conditions failing fidelity are marked INVALID and excluded "
-                "from hypothesis claims."
+                "from hypothesis claims for that evaluation set."
                 if any_invalid
                 else "All evaluated conditions passed fidelity on this run."
             ),

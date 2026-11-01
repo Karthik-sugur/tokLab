@@ -67,6 +67,13 @@ def load_ingest_config(path: Path | str | None = None) -> dict[str, Any]:
         if not isinstance(ratios, dict):
             raise ValueError(f"{cfg_path}: split_ratios must be a mapping")
         out["split_ratios"] = {str(k): float(v) for k, v in ratios.items()}
+    if "inorg_holdout_fraction" in data:
+        fraction = data["inorg_holdout_fraction"]
+        if isinstance(fraction, bool) or not isinstance(fraction, (int, float)):
+            raise ValueError(f"{cfg_path}: inorg_holdout_fraction must be a number")
+        if not 0.0 <= float(fraction) < 1.0:
+            raise ValueError(f"{cfg_path}: inorg_holdout_fraction must be in [0, 1)")
+        out["inorg_holdout_fraction"] = float(fraction)
     if "min_repos_per_split" in data:
         mins = data["min_repos_per_split"]
         if not isinstance(mins, dict):

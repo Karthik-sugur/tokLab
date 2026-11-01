@@ -17,6 +17,9 @@ data:
   manifest_path: data/processed/manifest.parquet
   synthetic_dir: data/synthetic
   eval_split: test
+  # test = new codebase (held-out repos); test_inorg = new files in known
+  # (adapt) codebases. See docs/decisions/004-inorg-eval.md.
+  eval_splits: [test, test_inorg]
   adapt_split: adapt
 
 vocab:

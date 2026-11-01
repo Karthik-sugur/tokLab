@@ -14,6 +14,7 @@ from toklab.data.dedup import (
 from toklab.data.ingest import ingest_repos, load_ingest_config
 from toklab.data.splits import (
     MIN_REPOS_DISABLED,
+    REPO_SPLITS,
     SPLITS,
     ManifestView,
     assign_splits,
@@ -172,11 +173,15 @@ def test_no_repo_appears_in_two_splits(tmp_path: Path) -> None:
     out = tmp_path / "out"
     build_dataset(repos, out, seed=0)
     repo_to_splits: dict[str, set[str]] = {}
-    for split in SPLITS:
+    for split in REPO_SPLITS:
         for f in ManifestView.from_parquet(out / "manifest.parquet", split):
             repo_to_splits.setdefault(f.repo, set()).add(f.split)
     for repo, splits in repo_to_splits.items():
         assert len(splits) == 1, f"repo {repo} in splits {splits}"
+    # File-level test_inorg only ever comes from adapt repositories.
+    inorg = ManifestView.from_parquet(out / "manifest.parquet", "test_inorg")
+    for f in inorg:
+        assert repo_to_splits[f.repo] == {"adapt"}
     total = sum(
         len(ManifestView.from_parquet(out / "manifest.parquet", s)) for s in SPLITS
     )

@@ -272,63 +272,69 @@ def run_experiment(
         vocab_hash=vocab_hash,
     )
 
-    eval_view = ManifestView.from_parquet(manifest, config.data.eval_split)
-    eval_files = tuple(sorted(eval_view.files(), key=lambda f: f.file_id))
-    if not eval_files:
-        raise ValueError(f"no files in eval split {config.data.eval_split!r}")
-    texts = _load_texts(repos_dir, eval_files)
+    eval_sets: dict[str, tuple[tuple, dict[str, str]]] = {}
+    status["eval_sets"] = {}
+    for split in config.data.resolved_eval_splits():
+        view = ManifestView.from_parquet(manifest, split)
+        files = tuple(sorted(view.files(), key=lambda f: f.file_id))
+        if not files:
+            if split == config.data.eval_split:
+                raise ValueError(f"no files in eval split {split!r}")
+            status["eval_sets"][split] = "not run: no files in split"
+            continue
+        eval_sets[split] = (files, _load_texts(repos_dir, files))
+        status["eval_sets"][split] = f"{len(files)} files"
+    store.write_status(chash, status)
 
     conditions = list(config.intrinsic.conditions)
-    fidelity_ok: dict[str, bool] = {}
+    fidelity_ok: dict[str, dict[str, bool]] = {
+        name: {c: True for c in conditions} for name in eval_sets
+    }
 
     if config.stages.fidelity:
         fid_rows: list[dict[str, Any]] = []
-        for cond in conditions:
-            report = check_roundtrip(toks[cond], eval_files, texts=texts)
-            ok = report.all_roundtrips_ok
-            fidelity_ok[cond] = ok
-            fid_rows.append(
-                {
-                    "condition": cond,
-                    "n_files": report.n_files,
-                    "n_roundtrip_ok": report.n_roundtrip_ok,
-                    "n_roundtrip_fail": report.n_roundtrip_fail,
-                    "n_orig_parsed": report.n_orig_parsed,
-                    "n_reparse_ok": report.n_reparse_ok,
-                    "n_reparse_fail": report.n_reparse_fail,
-                    "valid": ok,
-                    "status": "OK" if ok else "INVALID",
-                }
-            )
+        for name, (eval_files, texts) in eval_sets.items():
+            for cond in conditions:
+                report = check_roundtrip(toks[cond], eval_files, texts=texts)
+                ok = report.all_roundtrips_ok
+                fidelity_ok[name][cond] = ok
+                fid_rows.append(
+                    {
+                        "eval_set": name,
+                        "condition": cond,
+                        "n_files": report.n_files,
+                        "n_roundtrip_ok": report.n_roundtrip_ok,
+                        "n_roundtrip_fail": report.n_roundtrip_fail,
+                        "n_orig_parsed": report.n_orig_parsed,
+                        "n_reparse_ok": report.n_reparse_ok,
+                        "n_reparse_fail": report.n_reparse_fail,
+                        "valid": ok,
+                        "status": "OK" if ok else "INVALID",
+                    }
+                )
         store.write_parquet(chash, "fidelity.parquet", pd.DataFrame(fid_rows))
         status["stages"]["fidelity"] = "ok"
         store.write_status(chash, status)
-    else:
-        for cond in conditions:
-            fidelity_ok[cond] = True
-
-    valid_conditions = [c for c in conditions if fidelity_ok.get(c, True)]
 
     if config.stages.intrinsic:
         frames: list[pd.DataFrame] = []
         ci_rows: list[dict[str, Any]] = []
-        for cond in conditions:
-            df = measure_files(
-                toks[cond], eval_files, texts=texts, condition=cond
-            )
-            df = df.sort_values(
-                ["condition", "file_id", "metric"]
-            ).reset_index(drop=True)
-            frames.append(df)
-            if cond in valid_conditions:
-                by_repo = _tpk_by_repo(eval_files, df, cond)
-                ci = cluster_bootstrap_ci(
-                    by_repo, seed=config.seed, n_boot=config.intrinsic.n_boot
+        for name, (eval_files, texts) in eval_sets.items():
+            for cond in conditions:
+                df = measure_files(
+                    toks[cond], eval_files, texts=texts, condition=cond
                 )
-                ci_rows.append(_ci_to_row(cond, ci))
+                df.insert(0, "eval_set", name)
+                frames.append(df)
+                if fidelity_ok[name][cond]:
+                    by_repo = _tpk_by_repo(eval_files, df, cond)
+                    ci = cluster_bootstrap_ci(
+                        by_repo, seed=config.seed, n_boot=config.intrinsic.n_boot
+                    )
+                    ci_rows.append({"eval_set": name, **_ci_to_row(cond, ci)})
         metrics = pd.concat(frames, ignore_index=True)
         metrics = metrics.sort_values(
-            ["condition", "file_id", "metric"]
+            ["eval_set", "condition", "file_id", "metric"]
         ).reset_index(drop=True)
         store.write_parquet(chash, "intrinsic_metrics.parquet", metrics)
         store.write_parquet(
@@ -349,26 +355,27 @@ def run_experiment(
             toks_k, _, _, _ = _build_tokenizers(
                 config, repos_dir=repos_dir, manifest=manifest, k=k
             )
-            cond_vals: dict[str, dict[str, list[float]]] = {}
-            for c in ("C2", "C3", "C4", "C5"):
-                tok = toks_k[c]
-                by_repo: dict[str, list[float]] = {}
-                for sf in eval_files:
-                    text = texts[sf.file_id]
-                    n_ids = len(tok.encode(text).ids)
-                    n_bytes = len(text.encode("utf-8"))
-                    by_repo.setdefault(sf.repo, []).append(
-                        tokens_per_kb(n_ids, n_bytes)
-                    )
-                cond_vals[c] = by_repo
-            effects = factorial_analysis(
-                cond_vals,
-                k=k,
-                seed=config.seed,
-                n_boot=config.intrinsic.n_boot,
-                decision_rule=decision_rule,
-            )
-            effect_rows.append(_effects_to_row(effects))
+            for name, (eval_files, texts) in eval_sets.items():
+                cond_vals: dict[str, dict[str, list[float]]] = {}
+                for c in ("C2", "C3", "C4", "C5"):
+                    tok = toks_k[c]
+                    by_repo: dict[str, list[float]] = {}
+                    for sf in eval_files:
+                        text = texts[sf.file_id]
+                        n_ids = len(tok.encode(text).ids)
+                        n_bytes = len(text.encode("utf-8"))
+                        by_repo.setdefault(sf.repo, []).append(
+                            tokens_per_kb(n_ids, n_bytes)
+                        )
+                    cond_vals[c] = by_repo
+                effects = factorial_analysis(
+                    cond_vals,
+                    k=k,
+                    seed=config.seed,
+                    n_boot=config.intrinsic.n_boot,
+                    decision_rule=decision_rule,
+                )
+                effect_rows.append({"eval_set": name, **_effects_to_row(effects)})
         store.write_parquet(
             chash, "factorial_effects.parquet", pd.DataFrame(effect_rows)
         )
@@ -377,18 +384,20 @@ def run_experiment(
 
     if config.stages.context:
         ctx_frames: list[pd.DataFrame] = []
-        for cond in conditions:
-            df = context_utilisation_for_tokenizer(
-                toks[cond],
-                eval_files,
-                texts,
-                config.intrinsic.context_budgets,
-                condition=cond,
-            )
-            ctx_frames.append(df)
+        for name, (eval_files, texts) in eval_sets.items():
+            for cond in conditions:
+                df = context_utilisation_for_tokenizer(
+                    toks[cond],
+                    eval_files,
+                    texts,
+                    config.intrinsic.context_budgets,
+                    condition=cond,
+                )
+                df.insert(0, "eval_set", name)
+                ctx_frames.append(df)
         ctx = pd.concat(ctx_frames, ignore_index=True)
         ctx = ctx.sort_values(
-            ["condition", "budget_tokens"]
+            ["eval_set", "condition", "budget_tokens"]
         ).reset_index(drop=True)
         store.write_parquet(chash, "context_utilisation.parquet", ctx)
         status["stages"]["context"] = "ok"
