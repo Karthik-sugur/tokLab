@@ -7,6 +7,7 @@ from typing import Any
 
 import yaml
 
+from toklab.core.source_io import read_source_text
 from toklab.data.splits import ManifestView
 from toklab.evaluation.intrinsic import tokens_per_kb
 from toklab.evaluation.stats import FactorialEffects, factorial_analysis
@@ -105,7 +106,7 @@ def run_factorial(
         raise ValueError(f"no files in split {split!r}")
 
     texts = {
-        sf.file_id: (repos_dir / sf.repo / sf.path).read_text(encoding="utf-8")
+        sf.file_id: read_source_text(repos_dir / sf.repo / sf.path)
         for sf in (*adapt_view.files(), *eval_files)
     }
     base = shared_base_from_cfg(cfg)

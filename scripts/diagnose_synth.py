@@ -24,6 +24,7 @@ from typing import Any
 
 import libcst as cst
 
+from toklab.core.source_io import read_source_text
 from toklab.data.splits import ManifestView
 from toklab.data.synth.validate import alpha_equivalent, normalize_identifiers
 
@@ -213,10 +214,8 @@ def main() -> int:
     unchanged: list[tuple[str, str]] = []
     for sf in view.files():
         rel = f"{sf.repo}/{sf.path}"
-        orig = (args.repos / sf.repo / sf.path).read_text(encoding="utf-8")
-        new = (args.synthetic / "adapt" / sf.repo / sf.path).read_text(
-            encoding="utf-8"
-        )
+        orig = read_source_text(args.repos / sf.repo / sf.path)
+        new = read_source_text(args.synthetic / "adapt" / sf.repo / sf.path)
         if new == orig:
             unchanged.append((rel, orig))
             continue

@@ -20,6 +20,7 @@ from typing import Any
 
 import pandas as pd
 
+from toklab.core.source_io import read_source_text
 from toklab.core.types import SourceFile
 from toklab.data.splits import ManifestView
 from toklab.data.synth.drift import DRIFT_PROPORTIONS, apply_drift
@@ -247,7 +248,7 @@ def build_drift_texts(
     new_names: set[str] = set()
     maps: dict[str, dict[str, str]] = {}
     for sf in drift_files:
-        raw = (repos_dir / sf.repo / sf.path).read_text(encoding="utf-8")
+        raw = read_source_text(repos_dir / sf.repo / sf.path)
         file_seed = (
             seed + 1009 * proportion + int(sf.file_id[:8], 16) % 10_000
         )
@@ -295,7 +296,7 @@ def run_drift(
         raise ValueError("no files in drift_holdout split")
 
     adapt_texts = {
-        sf.file_id: (repos_dir / sf.repo / sf.path).read_text(encoding="utf-8")
+        sf.file_id: read_source_text(repos_dir / sf.repo / sf.path)
         for sf in adapt_files
     }
     adapt_idents = adapt_corpus_identifiers(adapt_files, adapt_texts)

@@ -6,7 +6,7 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
-from toklab.core.hashing import sha256_text
+from toklab.core.hashing import sha256_bytes, sha256_text
 from toklab.core.types import SourceFile
 
 MAX_FILE_BYTES = 1_048_576  # 1 MiB
@@ -93,9 +93,11 @@ def _looks_generated(path: Path, text: str) -> bool:
     return any(marker in head for marker in GENERATED_MARKERS)
 
 
-def _read_utf8_text(path: Path) -> str | None:
-    """Return decoded text, or None if binary / not valid UTF-8."""
-    raw = path.read_bytes()
+def _decode_utf8(raw: bytes) -> str | None:
+    """Return decoded text, or None if binary / not valid UTF-8.
+
+    Strict ``bytes.decode``: no newline translation, BOM kept as U+FEFF.
+    """
     if b"\x00" in raw:
         return None
     try:
@@ -139,15 +141,18 @@ def ingest_repos(
                 rel, skip_dir_names=skip_dirs, skip_file_names=skip_files
             ):
                 continue
-            n_bytes = path.stat().st_size
+            if path.stat().st_size > MAX_FILE_BYTES:
+                continue
+            raw = path.read_bytes()
+            n_bytes = len(raw)
             if n_bytes > MAX_FILE_BYTES or n_bytes < min_bytes:
                 continue
-            text = _read_utf8_text(path)
+            text = _decode_utf8(raw)
             if text is None:
                 continue
             if _looks_generated(path, text):
                 continue
-            digest = sha256_text(text)
+            digest = sha256_bytes(raw)
             file_id = sha256_text(f"{repo}:{rel.as_posix()}")
             yield SourceFile(
                 file_id=file_id,

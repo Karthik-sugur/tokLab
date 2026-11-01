@@ -12,6 +12,11 @@ def sha256_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+def sha256_bytes(data: bytes) -> str:
+    """Return the hex SHA-256 digest of raw ``data``."""
+    return hashlib.sha256(data).hexdigest()
+
+
 def config_hash(config: dict[str, Any]) -> str:
     """Return a SHA-256 hex digest of ``config`` as canonical sorted JSON."""
     payload = json.dumps(config, sort_keys=True, separators=(",", ":"), default=str)

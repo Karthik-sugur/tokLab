@@ -7,6 +7,7 @@ from typing import Any
 
 import pandas as pd
 
+from toklab.core.source_io import read_source_text
 from toklab.core.types import SourceFile
 from toklab.data.splits import ManifestView
 from toklab.evaluation.fidelity import FidelityReport, check_roundtrip
@@ -18,7 +19,7 @@ from toklab.tokenizers.registry import BASELINE_CONDITIONS, get_tokenizer
 def _load_texts(repos_dir: Path, files: tuple[SourceFile, ...]) -> dict[str, str]:
     texts: dict[str, str] = {}
     for sf in files:
-        texts[sf.file_id] = (repos_dir / sf.repo / sf.path).read_text(encoding="utf-8")
+        texts[sf.file_id] = read_source_text(repos_dir / sf.repo / sf.path)
     return texts
 
 

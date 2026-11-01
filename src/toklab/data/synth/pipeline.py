@@ -7,12 +7,14 @@
 from __future__ import annotations
 
 import json
+import shutil
 from collections import Counter
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
 
+from toklab.core.source_io import read_source_text, write_source_text
 from toklab.data.splits import ManifestView
 from toklab.data.synth.drift import DRIFT_PROPORTIONS, apply_drift
 from toklab.data.synth.lexicon import EnterpriseLexicon
@@ -23,13 +25,13 @@ DRIFT_SPLIT = "drift_holdout"
 SYNTH_MANIFEST = "synth_manifest.parquet"
 
 
-def _read(repos_dir: Path, repo: str, rel: str) -> str:
-    return (repos_dir / repo / rel).read_text(encoding="utf-8")
-
-
-def _write(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
+def _emit(src: Path, dst: Path, *, renamed: bool, text: str) -> None:
+    """Write a synthetic output; unchanged files are copied byte for byte."""
+    if renamed:
+        write_source_text(dst, text)
+    else:
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(src, dst)
 
 
 def _variant_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
@@ -84,12 +86,18 @@ def run_synth(
     for split in ADAPT_LEXICON_SPLITS:
         maps[split] = {}
         for sf in files_of(split):
-            text = _read(repos_dir, sf.repo, sf.path)
+            src = repos_dir / sf.repo / sf.path
+            text = read_source_text(src)
             result = rename_file_with_lexicon(text, lexicon, which="adapt")
             rel_key = f"{sf.repo}/{sf.path}"
             maps[split][rel_key] = result.rename_map
             adapt_new_names.update(result.rename_map.values())
-            _write(out_dir / split / sf.repo / sf.path, result.source)
+            _emit(
+                src,
+                out_dir / split / sf.repo / sf.path,
+                renamed=result.renamed,
+                text=result.source,
+            )
             rows.append(
                 {
                     "split": split,
@@ -111,14 +119,20 @@ def run_synth(
         variant = f"p{proportion}"
         drift_maps[str(proportion)] = {}
         for sf in drift_files:
-            text = _read(repos_dir, sf.repo, sf.path)
+            src = repos_dir / sf.repo / sf.path
+            text = read_source_text(src)
             # Distinct sub-seed per file+proportion for stability.
             file_seed = seed + 1009 * proportion + int(sf.file_id[:8], 16) % 10_000
             result = apply_drift(text, lexicon, proportion, seed=file_seed)
             rel_key = f"{sf.repo}/{sf.path}"
             drift_maps[str(proportion)][rel_key] = result.rename_map
             drift_new_names.update(result.rename_map.values())
-            _write(out_dir / "drift" / variant / sf.repo / sf.path, result.source)
+            _emit(
+                src,
+                out_dir / "drift" / variant / sf.repo / sf.path,
+                renamed=result.renamed,
+                text=result.source,
+            )
             rows.append(
                 {
                     "split": DRIFT_SPLIT,

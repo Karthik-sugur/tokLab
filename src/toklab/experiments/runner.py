@@ -10,6 +10,7 @@ import yaml
 
 from toklab.core.hashing import config_hash as hash_dict
 from toklab.core.hashing import sha256_text
+from toklab.core.source_io import read_source_text
 from toklab.data.splits import ManifestView
 from toklab.evaluation.fidelity import check_roundtrip
 from toklab.evaluation.intrinsic import (
@@ -37,7 +38,7 @@ from toklab.vocab.build import build_adapted_vocab, shared_base_from_cfg
 
 def _load_texts(repos_dir: Path, files: tuple) -> dict[str, str]:
     return {
-        sf.file_id: (repos_dir / sf.repo / sf.path).read_text(encoding="utf-8")
+        sf.file_id: read_source_text(repos_dir / sf.repo / sf.path)
         for sf in files
     }
 

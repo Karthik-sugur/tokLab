@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from toklab.core.source_io import read_source_text
 from toklab.core.types import SourceFile
 from toklab.data.splits import ManifestView
 from toklab.tokenizers.registry import get_tokenizer
@@ -12,7 +13,7 @@ from toklab.tokenizers.registry import get_tokenizer
 
 def _load_texts(repos_dir: Path, files: tuple[SourceFile, ...]) -> dict[str, str]:
     return {
-        sf.file_id: (repos_dir / sf.repo / sf.path).read_text(encoding="utf-8")
+        sf.file_id: read_source_text(repos_dir / sf.repo / sf.path)
         for sf in files
     }
 

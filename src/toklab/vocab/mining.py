@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
+from toklab.core.source_io import read_source_text
 from toklab.core.types import SourceFile
 from toklab.data.splits import ManifestView
 from toklab.parsing.segmenters import NativeSegmenter, TreeSitterSegmenter
@@ -101,7 +102,7 @@ def mine_candidates(
     repos_for: dict[str, set[str]] = defaultdict(set)
 
     for sf in view.files():
-        text = (repos_dir / sf.repo / sf.path).read_text(encoding="utf-8")
+        text = read_source_text(repos_dir / sf.repo / sf.path)
         if mode == "native":
             cands = _native_candidates(text, hf)
         elif mode == "structural":

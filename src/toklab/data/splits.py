@@ -11,6 +11,7 @@ from pathlib import Path
 import pandas as pd
 
 from toklab.core.hashing import config_hash, sha256_text
+from toklab.core.source_io import read_source_text
 from toklab.core.types import SourceFile
 from toklab.data.dedup import (
     DuplicateCluster,
@@ -211,7 +212,7 @@ def _load_texts(repos_dir: Path, files: list[SourceFile]) -> dict[str, str]:
     texts: dict[str, str] = {}
     for f in files:
         path = repos_dir / f.repo / f.path
-        texts[f.file_id] = path.read_text(encoding="utf-8")
+        texts[f.file_id] = read_source_text(path)
     return texts
 
 

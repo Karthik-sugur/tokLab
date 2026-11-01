@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from toklab.core.interfaces import Tokenizer
+from toklab.core.source_io import read_source_text
 from toklab.core.types import SourceFile
 
 
@@ -30,7 +31,7 @@ class FidelityReport:
 
 
 def _load_text(repos_dir: Path, sf: SourceFile) -> str:
-    return (repos_dir / sf.repo / sf.path).read_text(encoding="utf-8")
+    return read_source_text(repos_dir / sf.repo / sf.path)
 
 
 def check_roundtrip(
