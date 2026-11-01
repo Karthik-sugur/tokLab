@@ -22,6 +22,9 @@ from toklab.tokenizers.registry import get_tokenizer
 from toklab.vocab.adapted_vocab import AdaptedEntry, AdaptedVocab, empty_adapted_vocab
 from toklab.vocab.selection import ScoredCandidate
 
+# Ensure drift_holdout is non-empty on the 5-repo fixture.
+_DRIFT_MIN = {"adapt": 0, "val": 0, "test": 0, "drift_holdout": 1}
+
 
 @pytest.fixture(scope="module")
 def base() -> NativeHFTokenizer:
@@ -113,7 +116,7 @@ def test_coverage_zero_when_vocab_empty(base: NativeHFTokenizer) -> None:
 def test_p0_equals_no_drift_results(base: NativeHFTokenizer, tmp_path: Path) -> None:
     repos = _repos(tmp_path)
     man = tmp_path / "m"
-    build_dataset(repos, man, seed=0)
+    build_dataset(repos, man, seed=0, min_repos=_DRIFT_MIN)
     table, df, rows = run_drift(
         manifest=man / "manifest.parquet",
         repos_dir=repos,
@@ -149,7 +152,7 @@ def test_run_drift_sweep_writes_artifacts(
 ) -> None:
     repos = _repos(tmp_path)
     man = tmp_path / "m"
-    build_dataset(repos, man, seed=0)
+    build_dataset(repos, man, seed=0, min_repos=_DRIFT_MIN)
     out = tmp_path / "out"
     table, df, rows = run_drift(
         manifest=man / "manifest.parquet",

@@ -28,7 +28,12 @@ CREATE TABLE IF NOT EXISTS runs (
 
 
 def compute_config_hash(config_dict: dict[str, Any]) -> str:
-    """Stable short hash of the experiment config (full SHA-256 hex)."""
+    """Stable hash of the experiment config (full SHA-256 hex).
+
+    Callers that want the run identity to change when the dataset changes
+    must fold ``manifest_hash`` / ``synthetic_hash`` into ``config_dict``
+    (see :func:`toklab.experiments.runner.run_identity_dict`).
+    """
     return hash_config(config_dict)
 
 

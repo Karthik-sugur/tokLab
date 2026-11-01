@@ -1,4 +1,5 @@
-# MVP Python experiment (fixture-scale). Paths are relative to repo root.
+# Real-data MVP experiment on the 28-repo corpus.
+# Paths are relative to repo root.
 name: mvp_py
 seed: 0
 
@@ -12,8 +13,9 @@ model:
   head_dim: 64
 
 data:
-  repos_dir: tests/fixtures/mvp/repos
-  manifest_path: tests/fixtures/mvp/manifest/manifest.parquet
+  repos_dir: data/repos
+  manifest_path: data/processed/manifest.parquet
+  synthetic_dir: data/synthetic
   eval_split: test
   adapt_split: adapt
 

@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 from toklab.api.app import MAX_CONFIG_BYTES, create_app
 from toklab.experiments.config import ExperimentConfig
 from toklab.experiments.preview import MAX_PREVIEW_CHARS
+from toklab.experiments.runner import run_identity_dict
 from toklab.experiments.store import RunStore, compute_config_hash
 
 
@@ -54,7 +55,7 @@ def client(tmp_path: Path, mvp_paths: tuple[Path, Path]) -> TestClient:
 
     def fake_runner(config: ExperimentConfig) -> dict[str, Any]:
         store = RunStore(config.runs_root)
-        chash = compute_config_hash(config.canonical_dict())
+        chash = compute_config_hash(run_identity_dict(config))
         store.ensure_run_dir(chash)
         # Write artifacts BEFORE marking complete (tests poll on state).
         pd.DataFrame(
@@ -280,7 +281,7 @@ def test_run_409_busy(
     def slow_runner(config: EC) -> dict[str, Any]:
         release.wait(timeout=5)
         return {
-            "config_hash": compute_config_hash(config.canonical_dict()),
+            "config_hash": compute_config_hash(run_identity_dict(config)),
             "state": "complete",
             "name": config.name,
             "stages": {},

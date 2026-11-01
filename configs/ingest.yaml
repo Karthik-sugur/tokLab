@@ -22,3 +22,22 @@ skip_dir_names:
 skip_file_names:
   - conftest.py
   - setup.py
+
+# Skip files smaller than this many bytes (1 = drop empty files such as
+# bare __init__.py; they add no tokens and make per-file ratios undefined).
+min_bytes: 1
+
+# Repository-level split targets (fractions of *repos*, not files).
+# Cross-repo duplicate *files* are dropped (keep first repo by name);
+# repos are never merged into one split because of shared files.
+split_ratios:
+  adapt: 0.60
+  val: 0.10
+  test: 0.20
+  drift_holdout: 0.10
+
+# Minimum repos per split (adapt has no floor). Fail if impossible.
+min_repos_per_split:
+  val: 3
+  test: 3
+  drift_holdout: 3

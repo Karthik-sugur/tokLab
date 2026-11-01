@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from toklab.data.splits import build_dataset
+from toklab.data.splits import MIN_REPOS_DISABLED, build_dataset
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "tests" / "fixtures" / "mvp"
@@ -34,7 +34,7 @@ def main() -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(body, encoding="utf-8")
     MANIFEST.mkdir(parents=True, exist_ok=True)
-    counts = build_dataset(REPOS, MANIFEST, seed=0)
+    counts = build_dataset(REPOS, MANIFEST, seed=0, min_repos=MIN_REPOS_DISABLED)
     print(f"wrote {MANIFEST / 'manifest.parquet'} counts={counts}")
 
 

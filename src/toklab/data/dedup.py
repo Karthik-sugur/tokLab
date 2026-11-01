@@ -116,14 +116,41 @@ def cluster_duplicates(
     return clusters
 
 
+def drop_cross_repo_duplicates(
+    files: list[SourceFile],
+    clusters: list[DuplicateCluster],
+) -> list[SourceFile]:
+    """Drop cross-repo duplicate copies; keep the first repo by name.
+
+    Clusters that span repositories no longer force repo merges. Extra
+    copies are removed so a cluster cannot land in two splits. Within the
+    kept repo, all of that cluster's members are retained.
+    """
+    id_to_file = {f.file_id: f for f in files}
+    drop: set[str] = set()
+    for cluster in clusters:
+        members = [id_to_file[fid] for fid in cluster.file_ids if fid in id_to_file]
+        if len(members) < 2:
+            continue
+        repos = sorted({m.repo for m in members})
+        if len(repos) < 2:
+            continue
+        keep_repo = repos[0]
+        for m in members:
+            if m.repo != keep_repo:
+                drop.add(m.file_id)
+    if not drop:
+        return list(files)
+    return [f for f in files if f.file_id not in drop]
+
+
 def merge_repos_for_clusters(
     files: list[SourceFile],
     clusters: list[DuplicateCluster],
 ) -> list[frozenset[str]]:
-    """Return repo groups that must share a split.
+    """Deprecated helper: previously unioned repos that shared a cluster.
 
-    If a duplicate cluster spans multiple repositories, those repos are
-    unioned. Every repository appears in exactly one group.
+    Prefer :func:`drop_cross_repo_duplicates`. Kept for diagnostics only.
     """
     id_to_repo = {f.file_id: f.repo for f in files}
     uf = _UnionFind()

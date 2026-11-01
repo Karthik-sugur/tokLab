@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from toklab.core.types import SourceFile
-from toklab.data.splits import ManifestView, build_dataset
+from toklab.data.splits import MIN_REPOS_DISABLED, ManifestView, build_dataset
 from toklab.tokenizers.native_hf import NativeHFTokenizer
 from toklab.tokenizers.registry import get_tokenizer
 from toklab.vocab.adapted_vocab import AdaptedVocab
@@ -69,7 +69,7 @@ def test_k0_c5_matches_c4_ids(base: NativeHFTokenizer) -> None:
 def test_adapted_ids_append_only(base: NativeHFTokenizer, tmp_path: Path) -> None:
     repos = _enterprise_fixture(tmp_path)
     man = tmp_path / "m"
-    build_dataset(repos, man, seed=0)
+    build_dataset(repos, man, seed=0, min_repos=MIN_REPOS_DISABLED)
     view = ManifestView.from_parquet(man / "manifest.parquet", "adapt")
     vocab = build_adapted_vocab(
         view,
@@ -98,7 +98,7 @@ def test_adapted_ids_append_only(base: NativeHFTokenizer, tmp_path: Path) -> Non
 def test_mine_test_split_raises(base: NativeHFTokenizer, tmp_path: Path) -> None:
     repos = _enterprise_fixture(tmp_path)
     man = tmp_path / "m"
-    build_dataset(repos, man, seed=0)
+    build_dataset(repos, man, seed=0, min_repos=MIN_REPOS_DISABLED)
     test_view = ManifestView.from_parquet(man / "manifest.parquet", "test")
     with pytest.raises(PermissionError, match="adapt"):
         mine_candidates(
@@ -122,7 +122,7 @@ def test_mine_test_split_raises(base: NativeHFTokenizer, tmp_path: Path) -> None
 def test_roundtrip_c3_c5(base: NativeHFTokenizer, tmp_path: Path) -> None:
     repos = _enterprise_fixture(tmp_path)
     man = tmp_path / "m"
-    build_dataset(repos, man, seed=0)
+    build_dataset(repos, man, seed=0, min_repos=MIN_REPOS_DISABLED)
     adapt = ManifestView.from_parquet(man / "manifest.parquet", "adapt")
     vocab_n = build_adapted_vocab(
         adapt, repos_dir=repos, base=base, mode="native", k=16
@@ -142,7 +142,7 @@ def test_roundtrip_c3_c5(base: NativeHFTokenizer, tmp_path: Path) -> None:
 def test_selection_deterministic(base: NativeHFTokenizer, tmp_path: Path) -> None:
     repos = _enterprise_fixture(tmp_path)
     man = tmp_path / "m"
-    build_dataset(repos, man, seed=0)
+    build_dataset(repos, man, seed=0, min_repos=MIN_REPOS_DISABLED)
     adapt = ManifestView.from_parquet(man / "manifest.parquet", "adapt")
     cands = mine_candidates(
         adapt, repos_dir=repos, mode="native", base_tokenizer=base
@@ -189,7 +189,7 @@ def test_factorial_runs_on_fixture(base: NativeHFTokenizer, tmp_path: Path) -> N
 
     repos = _enterprise_fixture(tmp_path)
     man = tmp_path / "m"
-    build_dataset(repos, man, seed=0)
+    build_dataset(repos, man, seed=0, min_repos=MIN_REPOS_DISABLED)
     table, effects = run_factorial(
         manifest=man / "manifest.parquet",
         repos_dir=repos,

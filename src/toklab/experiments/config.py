@@ -22,6 +22,7 @@ class ModelConfig(BaseModel):
 class DataConfig(BaseModel):
     repos_dir: Path
     manifest_path: Path
+    synthetic_dir: Path | None = None
     eval_split: str = "test"
     adapt_split: str = "adapt"
 

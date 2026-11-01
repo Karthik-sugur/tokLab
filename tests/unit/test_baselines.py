@@ -189,12 +189,12 @@ def test_tokens_per_kb_formula() -> None:
 
 
 def test_run_baselines_on_fixture(tmp_path: Path) -> None:
-    from toklab.data.splits import build_dataset
+    from toklab.data.splits import MIN_REPOS_DISABLED, build_dataset
     from toklab.evaluation.baselines import run_baselines
 
     repos = _mini_repos(tmp_path)
     manifest_dir = tmp_path / "manifest"
-    build_dataset(repos, manifest_dir, seed=0)
+    build_dataset(repos, manifest_dir, seed=0, min_repos=MIN_REPOS_DISABLED)
     out = tmp_path / "base_out"
     # C1+C6 here for speed; full C1/C2/C6 exercised via CLI acceptance.
     table, fidelity, cis = run_baselines(

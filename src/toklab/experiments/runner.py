@@ -171,6 +171,51 @@ def _build_tokenizers(
     return toks, vocab_hash, vocab_n, vocab_s
 
 
+def _read_manifest_digest(manifest: Path) -> str:
+    hash_file = manifest.parent / "manifest_hash"
+    if hash_file.is_file():
+        return hash_file.read_text(encoding="utf-8").strip()
+    return sha256_text(manifest.read_bytes().hex())
+
+
+def _synthetic_layer_hash(synthetic_dir: Path | None) -> str | None:
+    """Hash of key synth artifacts so run id tracks the synthetic layer."""
+    if synthetic_dir is None:
+        return None
+    root = Path(synthetic_dir)
+    if not root.is_dir():
+        return None
+    parts: dict[str, str] = {}
+    for name in ("rename_map.json", "synth_summary.json", "lexicon_meta.json"):
+        path = root / name
+        if path.is_file():
+            parts[name] = sha256_text(path.read_text(encoding="utf-8"))
+    if not parts:
+        return None
+    return hash_dict(parts)
+
+
+def run_identity_dict(config: ExperimentConfig) -> dict[str, Any]:
+    """Canonical config plus data-layer digests (manifest + synthetic).
+
+    Including these digests ensures identical YAML on different corpora
+    yields different ``runs/<config_hash>/`` directories.
+    """
+    cfg_dict = config.canonical_dict()
+    manifest = Path(config.data.manifest_path)
+    manifest_digest = (
+        _read_manifest_digest(manifest) if manifest.is_file() else None
+    )
+    synth_dir = config.data.synthetic_dir
+    synthetic_digest = _synthetic_layer_hash(
+        Path(synth_dir) if synth_dir is not None else None
+    )
+    identity = dict(cfg_dict)
+    identity["manifest_hash"] = manifest_digest
+    identity["synthetic_hash"] = synthetic_digest
+    return identity
+
+
 def run_experiment(
     config: ExperimentConfig | Path | str,
 ) -> dict[str, Any]:
@@ -179,10 +224,12 @@ def run_experiment(
         config = load_experiment_config(config)
 
     cfg_dict = config.canonical_dict()
-    chash = compute_config_hash(cfg_dict)
+    identity = run_identity_dict(config)
+    chash = compute_config_hash(identity)
     store = RunStore(config.runs_root)
     store.ensure_run_dir(chash)
     store.write_json(chash, "config.json", cfg_dict)
+    store.write_json(chash, "run_identity.json", identity)
 
     status: dict[str, Any] = {
         "config_hash": chash,
@@ -201,11 +248,7 @@ def run_experiment(
     if not manifest.is_file():
         raise FileNotFoundError(f"manifest not found: {manifest}")
 
-    hash_file = manifest.parent / "manifest_hash"
-    if hash_file.is_file():
-        manifest_digest = hash_file.read_text(encoding="utf-8").strip()
-    else:
-        manifest_digest = sha256_text(manifest.read_bytes().hex())
+    manifest_digest = identity["manifest_hash"] or _read_manifest_digest(manifest)
 
     k_primary = max(config.vocab.k_values) if config.vocab.k_values else 0
     toks, vocab_hash, vocab_n, _vocab_s = _build_tokenizers(

@@ -111,10 +111,14 @@ def create_app(
             raise _http(422, str(exc), "invalid") from exc
         # Force runs_root to this API's store.
         config = config.model_copy(update={"runs_root": Path(store.runs_root)})
+        from toklab.experiments.runner import run_identity_dict
+
         cfg_dict = config.canonical_dict()
-        chash = compute_config_hash(cfg_dict)
+        identity = run_identity_dict(config)
+        chash = compute_config_hash(identity)
         store.ensure_run_dir(chash)
         store.write_json(chash, "config.json", cfg_dict)
+        store.write_json(chash, "run_identity.json", identity)
         status = {
             "config_hash": chash,
             "name": config.name,
@@ -161,7 +165,9 @@ def create_app(
         except ValidationError as exc:
             raise _http(422, str(exc), "invalid") from exc
         # Keep runs_root from the stored config so the hash matches ``exp_id``.
-        if compute_config_hash(config.canonical_dict()) != exp_id:
+        from toklab.experiments.runner import run_identity_dict
+
+        if compute_config_hash(run_identity_dict(config)) != exp_id:
             raise _http(422, "config hash mismatch with experiment id", "invalid")
         if worker.busy:
             raise _http(

@@ -8,7 +8,7 @@ import pandas as pd
 import pytest
 
 from toklab.core.types import EncodeResult, SourceFile
-from toklab.data.splits import build_dataset
+from toklab.data.splits import MIN_REPOS_DISABLED, build_dataset
 from toklab.evaluation.intrinsic import context_utilisation
 from toklab.evaluation.report import evaluate_hypotheses, render_report
 from toklab.evaluation.vocab_cost import (
@@ -168,7 +168,7 @@ def test_rerun_identical_token_metrics(tmp_path: Path) -> None:
 
     repos = _mini_repos(tmp_path)
     man = tmp_path / "manifest"
-    build_dataset(repos, man, seed=0)
+    build_dataset(repos, man, seed=0, min_repos=MIN_REPOS_DISABLED)
     runs = tmp_path / "runs"
 
     def make_cfg() -> ExperimentConfig:

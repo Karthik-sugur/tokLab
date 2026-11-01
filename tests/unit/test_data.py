@@ -7,9 +7,14 @@ from pathlib import Path
 import pytest
 
 from toklab.core.types import SourceFile
-from toklab.data.dedup import cluster_duplicates, merge_repos_for_clusters
+from toklab.data.dedup import (
+    cluster_duplicates,
+    drop_cross_repo_duplicates,
+)
 from toklab.data.ingest import ingest_repos, load_ingest_config
 from toklab.data.splits import (
+    MIN_REPOS_DISABLED,
+    SPLITS,
     ManifestView,
     assign_splits,
     build_dataset,
@@ -35,7 +40,7 @@ def make_fixture_repos(root: Path) -> Path:
     """Create small multi-repo fixture under ``root/repos``."""
     repos = root / "repos"
 
-    # repo_a / repo_b share an exact duplicate (forces repo merge).
+    # repo_a / repo_b share an exact duplicate (extra copy dropped).
     shared = "def shared():\n    return 1\n"
     _write(repos / "repo_a" / "a.py", "def a_only():\n    return 'a'\n")
     _write(repos / "repo_a" / "shared.py", shared)
@@ -62,6 +67,18 @@ def make_fixture_repos(root: Path) -> Path:
     big.parent.mkdir(parents=True, exist_ok=True)
     big.write_bytes(b"a = 1\n" * (200_000))  # > 1 MiB
 
+    return repos
+
+
+def make_twelve_repos(root: Path) -> Path:
+    """Twelve distinct repos for min-repo split guarantees."""
+    repos = root / "repos"
+    for i in range(12):
+        name = f"repo_{i:02d}"
+        _write(
+            repos / name / "mod.py",
+            f"def f_{i}():\n    return {i}\n",
+        )
     return repos
 
 
@@ -96,6 +113,8 @@ def test_ingest_config_lists_docs_examples_and_hook_files() -> None:
         assert name in dirs
     assert "conftest.py" in files
     assert "setup.py" in files
+    assert cfg["split_ratios"]["adapt"] == pytest.approx(0.60)
+    assert cfg["min_repos_per_split"]["val"] == 3
 
 
 def test_ingest_skips_docs_examples_conftest_setup(tmp_path: Path) -> None:
@@ -118,8 +137,26 @@ def test_ingest_skips_docs_examples_conftest_setup(tmp_path: Path) -> None:
     assert paths == {("demo", "pkg/core.py")}
 
 
+def test_ingest_skips_files_below_min_bytes(tmp_path: Path) -> None:
+    assert load_ingest_config()["min_bytes"] == 1
+    repos = tmp_path / "repos"
+    _write(repos / "demo" / "pkg" / "__init__.py", "")
+    _write(repos / "demo" / "pkg" / "one.py", "\n")
+    _write(repos / "demo" / "pkg" / "core.py", "x = 1\n")
+    paths = {f.path for f in ingest_repos(repos)}
+    assert paths == {"pkg/one.py", "pkg/core.py"}
+
+    cfg = tmp_path / "ingest.yaml"
+    cfg.write_text(
+        "skip_dir_names: [vendor]\nskip_file_names: []\nmin_bytes: 3\n",
+        encoding="utf-8",
+    )
+    paths = {f.path for f in ingest_repos(repos, config_path=cfg)}
+    assert paths == {"pkg/core.py"}
+
+
 def test_same_inputs_and_seed_identical_manifest_hash(tmp_path: Path) -> None:
-    repos = make_fixture_repos(tmp_path)
+    repos = make_twelve_repos(tmp_path)
     out1 = tmp_path / "out1"
     out2 = tmp_path / "out2"
     build_dataset(repos, out1, seed=0)
@@ -131,11 +168,9 @@ def test_same_inputs_and_seed_identical_manifest_hash(tmp_path: Path) -> None:
 
 
 def test_no_repo_appears_in_two_splits(tmp_path: Path) -> None:
-    repos = make_fixture_repos(tmp_path)
+    repos = make_twelve_repos(tmp_path)
     out = tmp_path / "out"
     build_dataset(repos, out, seed=0)
-    from toklab.data.splits import SPLITS
-
     repo_to_splits: dict[str, set[str]] = {}
     for split in SPLITS:
         for f in ManifestView.from_parquet(out / "manifest.parquet", split):
@@ -148,6 +183,18 @@ def test_no_repo_appears_in_two_splits(tmp_path: Path) -> None:
     assert total > 0
 
 
+def test_each_holdout_split_has_at_least_three_repos(tmp_path: Path) -> None:
+    repos = make_twelve_repos(tmp_path)
+    out = tmp_path / "out"
+    build_dataset(repos, out, seed=0)
+    for split in ("val", "test", "drift_holdout"):
+        repos_in = {
+            f.repo
+            for f in ManifestView.from_parquet(out / "manifest.parquet", split)
+        }
+        assert len(repos_in) >= 3, f"{split} has {repos_in}"
+
+
 def test_no_duplicate_cluster_spans_two_splits(tmp_path: Path) -> None:
     repos = make_fixture_repos(tmp_path)
     files = list(ingest_repos(repos))
@@ -155,17 +202,22 @@ def test_no_duplicate_cluster_spans_two_splits(tmp_path: Path) -> None:
         f.file_id: (repos / f.repo / f.path).read_text(encoding="utf-8") for f in files
     }
     clusters = cluster_duplicates(files, texts)
-    assigned = assign_splits(files, clusters, seed=0)
+    assigned = assign_splits(
+        files, clusters, seed=0, min_repos=MIN_REPOS_DISABLED
+    )
     id_to_split = {f.file_id: f.split for f in assigned}
     for cluster in clusters:
-        splits = {id_to_split[fid] for fid in cluster.file_ids}
+        present = [fid for fid in cluster.file_ids if fid in id_to_split]
+        if len(present) < 2:
+            continue
+        splits = {id_to_split[fid] for fid in present}
         assert len(splits) == 1, f"cluster {cluster.cluster_id} spans {splits}"
 
 
 def test_manifest_view_raises_on_other_split(tmp_path: Path) -> None:
     repos = make_fixture_repos(tmp_path)
     out = tmp_path / "out"
-    build_dataset(repos, out, seed=0)
+    build_dataset(repos, out, seed=0, min_repos=MIN_REPOS_DISABLED)
     view = ManifestView.from_parquet(out / "manifest.parquet", "adapt")
     assert view.split == "adapt"
     view.access_split("adapt")  # ok
@@ -173,30 +225,46 @@ def test_manifest_view_raises_on_other_split(tmp_path: Path) -> None:
         view.access_split("test")
 
 
-def test_exact_dup_merges_repos(tmp_path: Path) -> None:
+def test_exact_dup_keeps_first_repo_only(tmp_path: Path) -> None:
     repos = make_fixture_repos(tmp_path)
     files = list(ingest_repos(repos))
     texts = {
         f.file_id: (repos / f.repo / f.path).read_text(encoding="utf-8") for f in files
     }
     clusters = cluster_duplicates(files, texts)
-    groups = merge_repos_for_clusters(files, clusters)
-    # repo_a and repo_b share shared.py exact hash → same group.
-    ab = next(g for g in groups if "repo_a" in g or "repo_b" in g)
-    assert "repo_a" in ab and "repo_b" in ab
+    kept = drop_cross_repo_duplicates(files, clusters)
+    paths = {(f.repo, f.path) for f in kept}
+    assert ("repo_a", "shared.py") in paths
+    assert ("repo_b", "shared.py") not in paths
+    assert ("repo_b", "b.py") in paths
 
 
-def test_near_dup_merges_repos(tmp_path: Path) -> None:
+def test_near_dup_keeps_first_repo_only(tmp_path: Path) -> None:
     repos = make_fixture_repos(tmp_path)
     files = list(ingest_repos(repos))
     texts = {
         f.file_id: (repos / f.repo / f.path).read_text(encoding="utf-8") for f in files
     }
     clusters = cluster_duplicates(files, texts)
-    groups = merge_repos_for_clusters(files, clusters)
-    cd = [g for g in groups if "repo_c" in g or "repo_d" in g]
-    assert len(cd) == 1
-    assert "repo_c" in cd[0] and "repo_d" in cd[0]
+    kept = drop_cross_repo_duplicates(files, clusters)
+    paths = {(f.repo, f.path) for f in kept}
+    assert ("repo_c", "near.py") in paths
+    assert ("repo_d", "near.py") not in paths
+
+
+def test_duplicated_files_removed_from_all_but_one_repo(tmp_path: Path) -> None:
+    repos = make_fixture_repos(tmp_path)
+    out = tmp_path / "out"
+    build_dataset(repos, out, seed=0, min_repos=MIN_REPOS_DISABLED)
+    paths = {
+        (f.repo, f.path)
+        for split in SPLITS
+        for f in ManifestView.from_parquet(out / "manifest.parquet", split)
+    }
+    assert ("repo_a", "shared.py") in paths
+    assert ("repo_b", "shared.py") not in paths
+    assert ("repo_c", "near.py") in paths
+    assert ("repo_d", "near.py") not in paths
 
 
 def test_write_manifest_roundtrip(tmp_path: Path) -> None:
@@ -209,3 +277,9 @@ def test_write_manifest_roundtrip(tmp_path: Path) -> None:
     adapt = ManifestView.from_parquet(tmp_path / "m" / "manifest.parquet", "adapt")
     assert len(adapt) == 1
     assert adapt.files()[0].path == "a.py"
+
+
+def test_min_repos_impossible_raises(tmp_path: Path) -> None:
+    repos = make_fixture_repos(tmp_path)  # 7 repos < 9 required
+    with pytest.raises(ValueError, match="at least 9 repositories"):
+        build_dataset(repos, tmp_path / "out", seed=0)

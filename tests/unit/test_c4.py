@@ -164,7 +164,7 @@ def test_report_c4_vs_c2_token_counts(
 
 
 def test_compare_cli_path(tmp_path: Path, code_base: NativeHFTokenizer) -> None:
-    from toklab.data.splits import build_dataset
+    from toklab.data.splits import MIN_REPOS_DISABLED, build_dataset
     from toklab.evaluation.compare import compare_conditions
 
     repos = tmp_path / "repos"
@@ -179,7 +179,7 @@ def test_compare_cli_path(tmp_path: Path, code_base: NativeHFTokenizer) -> None:
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(body, encoding="utf-8")
     man = tmp_path / "manifest"
-    build_dataset(repos, man, seed=0)
+    build_dataset(repos, man, seed=0, min_repos=MIN_REPOS_DISABLED)
     table = compare_conditions(
         manifest=man / "manifest.parquet",
         repos_dir=repos,

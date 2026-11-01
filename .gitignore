@@ -6,6 +6,8 @@ env/
 # TokLab dataset checkouts and experiment outputs (repo root only)
 /data/
 /runs/
+/runs_archive/
+/logs/
 
 # Python
 __pycache__/

@@ -92,6 +92,18 @@ def helper():
 '''
 
 
+def test_unparseable_source_left_unchanged() -> None:
+    """libcst-invalid fixtures must not crash synth; copy through as-is."""
+    lex = EnterpriseLexicon.from_yaml(seed=0)
+    bad = "del (a := [1])\n"
+    result = rename_file_with_lexicon(bad, lex, which="adapt")
+    assert result.source == bad
+    assert result.rename_map == {}
+    drifted = apply_drift(bad, lex, 50, seed=0)
+    assert drifted.source == bad
+    assert drifted.rename_map == {}
+
+
 def test_adapt_drift_lexicons_share_no_terms() -> None:
     lex = EnterpriseLexicon.from_yaml(seed=0)
     overlap = lex.lexicon_adapt.all_terms() & lex.lexicon_drift.all_terms()
@@ -167,7 +179,7 @@ def test_drift_proportion_zero_is_identity() -> None:
 
 
 def test_pipeline_deterministic(tmp_path: Path) -> None:
-    from toklab.data.splits import build_dataset
+    from toklab.data.splits import MIN_REPOS_DISABLED, build_dataset
     from toklab.data.synth.pipeline import run_synth
 
     repos = tmp_path / "repos"
@@ -179,7 +191,7 @@ def test_pipeline_deterministic(tmp_path: Path) -> None:
             encoding="utf-8",
         )
     manifest_dir = tmp_path / "manifest"
-    build_dataset(repos, manifest_dir, seed=0)
+    build_dataset(repos, manifest_dir, seed=0, min_repos=MIN_REPOS_DISABLED)
     out1 = tmp_path / "s1"
     out2 = tmp_path / "s2"
     run_synth(
@@ -204,6 +216,127 @@ def test_manual_map_preserves_alpha_eq() -> None:
     out = rename_source(src, {"foo": "AcmeLogisticsShipmentRouter"})
     assert "AcmeLogisticsShipmentRouter" in out.source
     assert _alpha_eq(src, out.source)
+
+
+def test_import_path_part_never_renamed() -> None:
+    src = (
+        "import os.path\n"
+        "from urllib.parse import urlparse\n"
+        "def path():\n    return os.path.join('a')\n"
+        "def parse():\n    return urlparse('x')\n"
+    )
+    out = rename_source(src, {"path": "AcmeA", "parse": "AcmeB"})
+    assert out.source == src
+    assert out.rename_map == {}
+    assert out.renamed is False
+
+
+def test_same_string_renamed_in_every_scope() -> None:
+    # pytest-fixture style: def name reused as a parameter elsewhere.
+    src = (
+        "def modulus():\n    return 3\n\n"
+        "def test_mod(modulus):\n    return modulus % 2\n"
+    )
+    out = rename_source(src, {"modulus": "AcmeModulus"})
+    assert out.renamed is True
+    assert "modulus" not in out.source
+    assert _alpha_eq(src, out.source)
+
+
+def test_external_attribute_blocks_rename() -> None:
+    src = (
+        "class Response:\n    def json(self):\n        return {}\n\n"
+        "def use(r):\n    return r.json()\n"
+    )
+    assert "json" not in collect_renameable_names(src)
+    out = rename_source(src, {"json": "AcmeJson"})
+    assert out.source == src
+
+
+def test_self_attribute_renamed_with_method() -> None:
+    src = (
+        "class Job:\n    def run(self):\n        return 1\n\n"
+        "    def go(self):\n        return self.run() + Job.run(self)\n"
+    )
+    out = rename_source(src, {"run": "AcmeRun"})
+    assert out.renamed is True
+    assert "self.AcmeRun()" in out.source
+    assert "Job.AcmeRun(self)" in out.source
+    assert _alpha_eq(src, out.source)
+
+
+def test_keyword_argument_name_blocks_rename() -> None:
+    src = "def f(x):\n    return x\n\ndef g():\n    return dict(f=1)\n"
+    assert "f" not in collect_renameable_names(src)
+
+
+def test_failed_validation_copies_original(monkeypatch) -> None:
+    import toklab.data.synth.rename as rename_mod
+
+    monkeypatch.setattr(rename_mod, "alpha_equivalent", lambda a, b: False)
+    out = rename_mod.rename_source(
+        "def foo():\n    return foo\n", {"foo": "AcmeFoo"}
+    )
+    assert out.source == "def foo():\n    return foo\n"
+    assert out.renamed is False
+    assert out.reason == rename_mod.REASON_ALPHA_FAIL
+    assert out.rename_map == {}
+
+
+def test_pipeline_covers_all_splits_with_right_lexicon(tmp_path: Path) -> None:
+    import pandas as pd
+
+    from toklab.data.splits import build_dataset
+    from toklab.data.synth.pipeline import run_synth
+    from toklab.data.synth.validate import alpha_equivalent
+
+    repos = tmp_path / "repos"
+    for i in range(10):
+        p = repos / f"repo_{i:02d}" / "mod.py"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(
+            f"class Thing{i}:\n    def run(self):\n        return self.run_{i}()\n"
+            f"\n    def run_{i}(self):\n        return {i}\n",
+            encoding="utf-8",
+        )
+    manifest_dir = tmp_path / "manifest"
+    build_dataset(
+        repos,
+        manifest_dir,
+        seed=0,
+        min_repos={"val": 1, "test": 1, "drift_holdout": 1},
+    )
+    out = tmp_path / "synth"
+    summary = run_synth(
+        manifest=manifest_dir / "manifest.parquet", repos_dir=repos, out_dir=out
+    )
+    df = pd.read_parquet(out / "synth_manifest.parquet")
+    lex = EnterpriseLexicon.from_yaml(seed=0)
+    adapt_orgs = lex.lexicon_adapt.orgs
+    drift_orgs = lex.lexicon_drift.orgs
+    maps = json.loads((out / "rename_map.json").read_text(encoding="utf-8"))
+    for split in ("adapt", "val", "test"):
+        rows = df[df["split"] == split]
+        assert len(rows) > 0
+        assert set(rows["variant"]) == {"adapt_lexicon"}
+        for new in (n for m in maps[split].values() for n in m.values()):
+            assert new.startswith(adapt_orgs)
+            assert not new.startswith(drift_orgs)
+    drift_rows = df[df["split"] == "drift_holdout"]
+    assert set(drift_rows["variant"]) == {
+        "drift_p0", "drift_p10", "drift_p25", "drift_p50"
+    }
+    for m in maps["drift"].values():
+        for new in (n for per_file in m.values() for n in per_file.values()):
+            assert new.startswith(drift_orgs)
+    for row in df.itertuples(index=False):
+        orig = (repos / row.repo / row.path).read_text(encoding="utf-8")
+        got = (out / row.output).read_text(encoding="utf-8")
+        if row.renamed:
+            assert got != orig and alpha_equivalent(orig, got)
+        else:
+            assert got == orig
+    assert summary["variants"]["adapt"]["files_renamed"] > 0
 
 
 def test_builtin_name_in_map_ignored() -> None:

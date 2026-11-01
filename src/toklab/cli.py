@@ -93,10 +93,31 @@ def data_build(
     ] = 0,
 ) -> None:
     """Ingest repos, deduplicate, split by repository, write manifest."""
-    from toklab.data.splits import build_dataset, split_counts_message
+    import pandas as pd
+
+    from toklab.core.types import SourceFile
+    from toklab.data.splits import (
+        build_dataset,
+        format_split_detail,
+        split_counts_message,
+    )
 
     counts = build_dataset(repos_dir=repos, out_dir=out, seed=seed)
     typer.echo(split_counts_message(counts))
+    df = pd.read_parquet(out / "manifest.parquet")
+    assigned = [
+        SourceFile(
+            file_id=row.file_id,
+            repo=row.repo,
+            path=row.path,
+            sha256=row.sha256,
+            language=row.language,
+            n_bytes=int(row.n_bytes),
+            split=row.split,
+        )
+        for row in df.itertuples(index=False)
+    ]
+    typer.echo(format_split_detail(assigned))
     typer.echo(f"manifest={(out / 'manifest.parquet').resolve()}")
     typer.echo(f"manifest_hash={(out / 'manifest_hash').resolve()}")
 
@@ -122,22 +143,46 @@ def data_synth(
         int,
         typer.Option("--seed", help="RNG seed for lexicon and drift"),
     ] = 0,
+    only: Annotated[
+        Path | None,
+        typer.Option(
+            "--only",
+            help="Optional file listing repo/path keys to process (diagnostics)",
+        ),
+    ] = None,
 ) -> None:
-    """Apply enterprise rename (adapt) and drift variants (drift_holdout)."""
+    """Rename adapt/val/test (lexicon_adapt); drift variants for drift_holdout."""
     from toklab.data.synth import run_synth
 
+    only_keys = None
+    if only is not None:
+        only_keys = {
+            line.strip()
+            for line in only.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        }
     summary = run_synth(
         manifest=manifest,
         repos_dir=repos,
         out_dir=out,
         seed=seed,
+        only=only_keys,
     )
     typer.echo(
         "synth "
         f"adapt_files={summary['adapt_files']} "
+        f"val_files={summary['val_files']} "
+        f"test_files={summary['test_files']} "
         f"drift_holdout_files={summary['drift_holdout_files']} "
         f"seed={summary['seed']}"
     )
+    for key, v in summary["variants"].items():
+        typer.echo(
+            f"  {key}: files={v['files']} renamed={v['files_renamed']} "
+            f"copied_unchanged={v['files_copied_unchanged']} "
+            f"reasons={v['unchanged_reasons']} "
+            f"identifiers_renamed={v['identifiers_renamed']}"
+        )
 
 
 @run_app.command("factorial")
