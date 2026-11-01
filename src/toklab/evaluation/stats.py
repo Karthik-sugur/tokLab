@@ -161,14 +161,15 @@ def factorial_analysis(
         if c not in condition_repo_values:
             raise ValueError(f"missing condition {c} in factorial input")
 
+    # Fixed per-condition offsets: str hash() is salted per process.
     cis = {
         c: cluster_bootstrap_ci(
             condition_repo_values[c],
-            seed=seed + hash(c) % 1000,
+            seed=seed + 101 * (idx + 1),
             n_boot=n_boot,
             alpha=alpha,
         )
-        for c in need
+        for idx, c in enumerate(need)
     }
     means = {c: _repo_means(condition_repo_values[c]) for c in need}
 

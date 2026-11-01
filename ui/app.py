@@ -70,7 +70,7 @@ def grey_note(cond: str, fmap: dict[str, dict[str, Any]]) -> str | None:
     return None
 
 
-def page_preview(cli: TokLabClient) -> None:
+def page_preview(cli: TokLabClient, exp_id: str = "") -> None:
     st.header("1 · Preview")
     text = st.text_area(
         "Snippet",
@@ -84,11 +84,13 @@ def page_preview(cli: TokLabClient) -> None:
     )
     if st.button("Tokenize", type="primary"):
         try:
-            data = cli.preview(text, conditions)
+            data = cli.preview(text, conditions, experiment_id=exp_id or None)
         except ApiUnavailable as exc:
             stop_on_unavailable(exc)
         except httpx.HTTPStatusError as exc:
             stop_on_http_error(exc)
+        if data.get("note"):
+            st.info(data["note"])
         for block in data.get("conditions") or []:
             cond = block["condition"]
             st.subheader(f"{cond} — {block['n_tokens']} tokens")
@@ -374,7 +376,7 @@ def main() -> None:
 
     try:
         if page == "Preview":
-            page_preview(cli)
+            page_preview(cli, exp_id.strip())
             return
         if not exp_id.strip():
             st.info(

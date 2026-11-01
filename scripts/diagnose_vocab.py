@@ -47,12 +47,16 @@ def main() -> int:
     args = ap.parse_args()
 
     cfg = load_experiment_config(args.config)
-    manifest = Path(cfg.data.manifest_path)
+    run_corpus = cfg.data.resolved_corpus()
+    manifest = Path(run_corpus.manifest)
     min_freq, min_repos = cfg.vocab.min_freq, cfg.vocab.min_repos
     k_values = list(cfg.vocab.k_values)
     print(f"corpus={args.corpus} manifest={manifest}")
     print(f"config: min_freq={min_freq} min_repos={min_repos} k_values={k_values}")
-    print(f"config: data.repos_dir={cfg.data.repos_dir} (the corpus the runner reads)")
+    print(
+        f"config: data.corpus kind={run_corpus.kind} dir={run_corpus.dir} "
+        "(the corpus the runner reads)"
+    )
 
     base = shared_base_from_cfg(_model_cfg(cfg))
     adapt_view = ManifestView.from_parquet(manifest, "adapt")

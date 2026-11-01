@@ -9,7 +9,7 @@
 {% endif %}
 {% for s in eval_sets if s.any_invalid %}
 > **INVALID ({{ s.name }}):** condition(s) {{ s.invalid_conditions | join(", ") }} failed
-> fidelity (lossless round-trip) on eval set `{{ s.name }}`. They are marked
+> fidelity (lossless round-trip) on eval set `{{ s.name }}`{% if k_star is not none %} at K*={{ k_star }}{% endif %}. They are marked
 > INVALID and **excluded from hypothesis claims** for that set.
 
 {% endfor %}
@@ -28,6 +28,62 @@
 | model | {{ config.get("model", {}).get("model_name", "n/a") }} |
 
 Library versions: {% for k, v in (env.library_versions or {}).items() %}{{ k }}={{ v }}{% if not loop.last %}, {% endif %}{% endfor %}{{ "\n" }}
+## Corpus
+
+{% if corpus %}
+| Field | Value |
+|-------|-------|
+| kind | **{{ corpus.kind }}** |
+| dir | `{{ corpus.dir }}` |
+| manifest | `{{ corpus.manifest }}` |
+| manifest_hash | `{{ corpus.manifest_hash }}` |
+| synthetic_hash | {% if corpus.synthetic_hash %}`{{ corpus.synthetic_hash }}`{% else %}n/a (not a synthetic corpus){% endif %} |
+
+| split | files | repos |
+|-------|-------|-------|
+{% for split, n in corpus.files_per_split.items() %}
+| {{ split }} | {{ n }} | {{ (corpus.repos_per_split or {}).get(split, []) | length }} |
+{% endfor %}
+
+{% if corpus.variants %}
+Synthetic layer (from `synth_manifest.parquet`):
+
+| split | variant | files | renamed | copied unchanged | unchanged reasons |
+|-------|---------|-------|---------|------------------|-------------------|
+{% for v in corpus.variants %}
+| {{ v.split }} | {{ v.variant }} | {{ v.files }} | {{ v.files_renamed }} | {{ v.files_copied_unchanged }} | {% for r, n in v.unchanged_reasons.items() %}{{ r }}={{ n }}{% if not loop.last %}, {% endif %}{% else %}—{% endfor %} |
+{% endfor %}
+{% endif %}
+{% else %}
+Corpus not recorded for this run (legacy run: read `data.repos_dir`).
+{% endif %}
+
+## K sweep and K selection
+
+{% if k_selection %}
+Rule (docs/decisions/005-k-selection.md): {{ k_selection.rule }}. Selection
+split: `{{ k_selection.split }}` ({{ k_selection.n_files }} files), condition
+{{ k_selection.condition }} only, metric {{ k_selection.metric }}.
+{% if k_sweep %}
+Nominal K values {{ k_sweep.nominal_k_values }}; positive-gain candidates
+{% for m, n in k_sweep.n_positive_gain_candidates.items() %}{{ m }}={{ n }}{% if not loop.last %}, {% endif %}{% endfor %};
+swept K values {{ k_sweep.k_values }}.
+{% endif %}
+
+| K | C3 vocab size | val tokens/KB | C3 round-trip failures | eligible |
+|---|---------------|---------------|------------------------|----------|
+{% for r in k_selection.per_k %}
+| {{ r.k }}{% if r.k == k_star %} (K*){% endif %} | {{ r.vocab_size }} | {{ "%.4f"|format(r.tokens_per_kb) }} | {{ r.roundtrip_fail }} | {{ r.eligible }} |
+{% else %}
+| — | — | not run | — | — |
+{% endfor %}
+
+**K\* = {{ k_star if k_star is not none else "not selected" }}** ({{ k_selection.status }}).
+Hypotheses below are judged at K* only; other K rows are descriptive.
+{% else %}
+K selection not recorded (legacy run): hypotheses use the largest K.
+{% endif %}
+
 ## Evaluation sets
 
 | eval set | role | description | status |
@@ -42,49 +98,50 @@ Library versions: {% for k, v in (env.library_versions or {}).items() %}{{ k }}=
 {% if not s.ran %}
 Not run for this evaluation set ({{ s.status_note }}).
 
-{% else %}
+{% endif %}
 ## Fidelity [{{ s.name }}]
 
-| condition | n_files | roundtrip_ok | roundtrip_fail | status |
-|-----------|---------|--------------|----------------|--------|
+| K | condition | n_files | roundtrip_ok | roundtrip_fail | status |
+|---|-----------|---------|--------------|----------------|--------|
 {% for r in s.fidelity %}
-| {{ r.condition }} | {{ r.n_files }} | {{ r.n_roundtrip_ok }} | {{ r.n_roundtrip_fail }} | **{{ r.status }}** |
-{% else %}
-| — | — | — | — | not run |
-{% endfor %}
-
-## Token efficiency [{{ s.name }}] (tokens/KB, lower is better)
-
-Cluster-bootstrap mean with CI. Rows for INVALID conditions are listed but
-excluded from claims.
-
-| condition | mean | CI low | CI high | n_repos | notes |
-|-----------|------|--------|---------|---------|-------|
-{% for r in s.efficiency %}
-| {{ r.condition }} | {{ "%.4f"|format(r.estimate) }} | {{ "%.4f"|format(r.ci_low) }} | {{ "%.4f"|format(r.ci_high) }} | {{ r.n_repos }} | {% if r.excluded %}EXCLUDED (INVALID){% else %}—{% endif %} |
+| {{ r.k if r.k is not none else "—" }} | {{ r.condition }} | {{ r.n_files }} | {{ r.n_roundtrip_ok }} | {{ r.n_roundtrip_fail }} | **{{ r.status }}** |
 {% else %}
 | — | — | — | — | — | not run |
 {% endfor %}
 
+## Token efficiency [{{ s.name }}] (tokens/KB, lower is better)
+
+Cluster-bootstrap mean over files with a CI from resampling repositories.
+C2 and C4 do not depend on K; they are repeated so each K is a full 2×2.
+Rows for INVALID conditions are listed but excluded from claims.
+
+| K | condition | mean | CI low | CI high | n_repos | notes |
+|---|-----------|------|--------|---------|---------|-------|
+{% for r in s.efficiency %}
+| {{ r.k if r.k is not none else "—" }}{% if r.k_star %} (K*){% endif %} | {{ r.condition }} | {{ "%.4f"|format(r.estimate) }} | {{ "%.4f"|format(r.ci_low) }} | {{ "%.4f"|format(r.ci_high) }} | {{ r.n_repos }} | {% if r.excluded %}EXCLUDED (INVALID){% else %}—{% endif %} |
+{% else %}
+| — | — | — | — | — | — | not run |
+{% endfor %}
+
 ## 2×2 interaction [{{ s.name }}] (structure × domain)
 
-Decision rule: {{ decision_rule }}
+Pre-registered decision rule (quoted from configs/hypotheses.yaml): "{{ decision_rule }}"
 
 {% if s.interaction_note %}
 **Interaction summary:** {{ s.interaction_note }}
 {% endif %}
 
-| k | C2 | C3 | C4 | C5 | effect_S | effect_D | I | I CI | C5>best |
-|---|----|----|----|----|----------|----------|---|------|---------|
+| K | C2 | C3 | C4 | C5 | effect_S | effect_D | I | I CI | C5 better than best of C3/C4 (CI excl. 0) |
+|---|----|----|----|----|----------|----------|---|------|------------------------------|
 {% for e in s.effects %}
-| {{ e.k }} | {{ "%.2f"|format(e.c2) }} | {{ "%.2f"|format(e.c3) }} | {{ "%.2f"|format(e.c4) }} | {{ "%.2f"|format(e.c5) }} | {{ "%.2f"|format(e.effect_s) }} | {{ "%.2f"|format(e.effect_d) }} | {{ "%.4f"|format(e.interaction) }} | [{{ "%.3f"|format(e.interaction_low) }}, {{ "%.3f"|format(e.interaction_high) }}] | {{ e.combined_beats_either }} |
+| {{ e.k }}{% if e.is_k_star %} (K*){% endif %} | {{ "%.2f"|format(e.c2) }} | {{ "%.2f"|format(e.c3) }} | {{ "%.2f"|format(e.c4) }} | {{ "%.2f"|format(e.c5) }} | {{ "%.2f"|format(e.effect_s) }} | {{ "%.2f"|format(e.effect_d) }} | {{ "%.4f"|format(e.interaction) }} | [{{ "%.3f"|format(e.interaction_low) }}, {{ "%.3f"|format(e.interaction_high) }}] | {{ e.combined_beats_either }} |
 {% else %}
 | — | not run | | | | | | | | |
 {% endfor %}
 
 ## Context utilisation [{{ s.name }}]
 
-Greedy first-fit packing in fixed `file_id` order.
+Greedy first-fit packing in fixed `file_id` order{% if s.context and s.context[0].k is not none %} at K={{ s.context[0].k }}{% endif %}.
 
 | condition | budget | files_fit | bytes_fit | tokens_used |
 |-----------|--------|-----------|-----------|-------------|
@@ -94,7 +151,7 @@ Greedy first-fit packing in fixed `file_id` order.
 | — | — | — | — | not run |
 {% endfor %}
 
-## Hypotheses verdicts [{{ s.name }}]{% if s.primary %} (primary){% else %} (secondary){% endif %}
+## Hypotheses verdicts [{{ s.name }}]{% if s.primary %} (primary){% else %} (secondary){% endif %}{% if k_star is not none %} at K*={{ k_star }}{% endif %}
 
 {% for h in s.hypotheses %}
 ### {{ h.id }} [{{ s.name }}] — {{ h.verdict }}
@@ -106,30 +163,45 @@ Greedy first-fit packing in fixed `file_id` order.
 - reason: {{ h.reason }}
 
 {% else %}
-No hypotheses evaluated.
+No hypotheses defined in hypotheses.yaml.
 {% endfor %}
-{% endif %}
 {% endfor %}
 # Run-wide results
 
-## Systems cost
+## Systems cost{% if k_star is not none %} (K*={{ k_star }}){% endif %}
 
 {% if systems %}
-| condition | seq_len | device | dtype | median_ms | IQR_ms | peak_mem | ms/src_KB | quality_valid | notes |
-|-----------|---------|--------|-------|-----------|--------|----------|-----------|---------------|-------|
+Separate step (`toklab run systems`). Inputs are the first `seq_len` token
+ids of the eval split for each condition; ms/src_KB uses the original bytes
+those ids cover. Rows with quality_valid=False use untrained new vocab rows.
+
+| condition | K | seq_len | device | dtype | threads | median_ms | IQR_ms | peak_mem | src_bytes | ms/src_KB | quality_valid | notes |
+|-----------|---|---------|--------|-------|---------|-----------|--------|----------|-----------|-----------|---------------|-------|
 {% for r in systems %}
-| {{ r.condition }} | {{ r.seq_len }} | {{ r.device }} | {{ r.dtype }} | {{ "%.3f"|format(r.latency_ms_median) }} | {{ "%.3f"|format(r.latency_ms_iqr) }} | {{ r.peak_memory_bytes }} | {{ "%.4f"|format(r.time_per_source_kb_ms) }} | {{ r.quality_valid }} | {{ r.notes }} |
+| {{ r.condition }} | {{ r.get("k", "—") }} | {{ r.seq_len }} | {{ r.device }} | {{ r.dtype }} | {{ r.get("torch_threads", "—") }} | {{ "%.3f"|format(r.latency_ms_median) }} | {{ "%.3f"|format(r.latency_ms_iqr) }} | {{ r.peak_memory_bytes }} | {{ r.get("source_bytes", "—") }} | {{ "%.4f"|format(r.time_per_source_kb_ms) }} | {{ r.quality_valid }} | {{ r.notes }} |
 {% endfor %}
 {% else %}
-Systems stage not run (disabled or skipped).
+Systems stage not run{% if systems_status %} ({{ systems_status }}){% endif %}.
 {% endif %}
 
-## Vocab overhead (ESTIMATE)
+## Vocab overhead per K (ESTIMATE)
 
-All figures below are labelled **ESTIMATE** (not measured hardware counters).
+delta_params / delta_bytes are **ESTIMATE** labels (not measured). Tokens
+saved per KB = baseline mean tokens/KB minus condition mean tokens/KB on the
+primary eval set (`{{ primary_eval_set }}`); C3 vs C2, C5 vs C4.
 
-| seq_len | delta_V | delta_params | delta_bytes | kv_cache_bytes | flops/token |
-|---------|---------|--------------|-------------|----------------|-------------|
+| K | condition | delta_V | delta_params | delta_bytes | tokens saved per KB ({{ primary_eval_set }}) |
+|---|-----------|---------|--------------|-------------|------------------------------|
+{% for r in vocab_cost_by_k %}
+| {{ r.k }}{% if r.k == k_star %} (K*){% endif %} | {{ r.condition }} vs {{ r.baseline }} | {{ r.delta_v }} | {{ r.delta_params }} | {{ r.delta_bytes }} | {% if r.tokens_saved_per_kb is none or r.tokens_saved_per_kb != r.tokens_saved_per_kb %}not run{% else %}{{ "%.4f"|format(r.tokens_saved_per_kb) }}{% endif %} |
+{% else %}
+| — | — | — | — | — | not run |
+{% endfor %}
+
+### KV cache / FLOPs at the reported K (ESTIMATE)
+
+| seq_len | delta_V (C3) | delta_params | delta_bytes | kv_cache_bytes | flops/token |
+|---------|--------------|--------------|-------------|----------------|-------------|
 {% for r in vocab_cost %}
 | {{ r.seq_len }} | {{ r.delta_v }} | {{ r.vocab_delta_params }} | {{ r.vocab_delta_bytes }} | {{ r.kv_kv_cache_bytes }} | {{ "%.3e"|format(r.flops_flops_per_token_estimate) }} |
 {% else %}
@@ -139,8 +211,9 @@ All figures below are labelled **ESTIMATE** (not measured hardware counters).
 ## Vocabulary drift (drift_holdout repositories)
 
 Proportions ``p ∈ {0, 10, 25, 50}``. Baselines C2/C4; STATIC = frozen adapt
-vocab; REFRESH = append-only new entries from a small drifted v1 sample
-(old ids unchanged). BPB only for gate-valid fine-tuned variants.
+vocab{% if drift_meta %} (K={{ drift_meta.k_static }}; drift texts: {{ drift_meta.get("drift_texts", "renamed in memory (apply_drift)") }}){% endif %};
+REFRESH = append-only new entries from a small drifted v1 sample (old ids
+unchanged). BPB only for gate-valid fine-tuned variants.
 
 | p | variant | baseline | n_tok | n_base | reduction | coverage | bpb | \|V\| |
 |---|---------|----------|-------|--------|-----------|----------|-----|------|

@@ -85,15 +85,18 @@ class TokLabClient:
         return self._get("/datasets")
 
     def preview(
-        self, text: str, conditions: list[str] | None = None
+        self,
+        text: str,
+        conditions: list[str] | None = None,
+        experiment_id: str | None = None,
     ) -> dict[str, Any]:
-        return self._post(
-            "/tokenize/preview",
-            {
-                "text": text,
-                "conditions": conditions or ["C2", "C4", "C5"],
-            },
-        )
+        body: dict[str, Any] = {
+            "text": text,
+            "conditions": conditions or ["C2", "C4", "C5"],
+        }
+        if experiment_id:
+            body["experiment_id"] = experiment_id
+        return self._post("/tokenize/preview", body)
 
     def experiment(self, exp_id: str) -> dict[str, Any]:
         return self._get(f"/experiments/{exp_id}")

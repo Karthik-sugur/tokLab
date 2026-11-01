@@ -15,7 +15,7 @@ from typing import Any
 import pandas as pd
 
 from toklab.core.source_io import read_source_text, write_source_text
-from toklab.data.splits import ManifestView
+from toklab.data.splits import ManifestView, read_manifest_digest
 from toklab.data.synth.drift import DRIFT_PROPORTIONS, apply_drift
 from toklab.data.synth.lexicon import EnterpriseLexicon
 from toklab.data.synth.rename import rename_file_with_lexicon
@@ -69,6 +69,7 @@ def run_synth(
     repos_dir = Path(repos_dir)
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+    source_manifest_hash = read_manifest_digest(manifest)
 
     lexicon = EnterpriseLexicon.from_yaml(lexicon_yaml, seed=seed)
     assert not (
@@ -167,9 +168,10 @@ def run_synth(
         "split", "variant", "file_id", "repo", "path", "output",
         "renamed", "reason", "n_identifiers",
     ]
-    pd.DataFrame(rows, columns=columns).to_parquet(
-        out_dir / SYNTH_MANIFEST, index=False
-    )
+    synth_df = pd.DataFrame(rows, columns=columns)
+    synth_df["manifest_hash"] = source_manifest_hash
+    synth_df["subset"] = only is not None
+    synth_df.to_parquet(out_dir / SYNTH_MANIFEST, index=False)
 
     by_variant: dict[str, list[dict[str, Any]]] = {}
     for r in rows:
@@ -177,6 +179,7 @@ def run_synth(
         by_variant.setdefault(key, []).append(r)
     summary: dict[str, Any] = {
         "seed": seed,
+        "manifest_hash": source_manifest_hash,
         "drift_proportions": list(DRIFT_PROPORTIONS),
         "subset": only is not None,
         "variants": {k: _variant_summary(v) for k, v in by_variant.items()},

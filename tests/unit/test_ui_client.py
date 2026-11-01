@@ -54,6 +54,21 @@ def test_client_preview_closed_port_raises_api_unavailable() -> None:
     assert "Cannot reach the API at http://127.0.0.1:9" in str(ei.value)
 
 
+def test_client_preview_sends_sidebar_experiment_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sent: list[tuple[str, dict]] = []
+    cli = TokLabClient("http://127.0.0.1:9")
+    monkeypatch.setattr(cli, "_post", lambda path, body: sent.append((path, body)))
+    cli.preview("x\n", ["C3"], experiment_id="abc123")
+    cli.preview("x\n", ["C3"])
+    assert sent[0] == (
+        "/tokenize/preview",
+        {"text": "x\n", "conditions": ["C3"], "experiment_id": "abc123"},
+    )
+    assert "experiment_id" not in sent[1][1]
+
+
 def _status_exc(status: int, body: dict | str) -> httpx.HTTPStatusError:
     if isinstance(body, dict):
         content = json.dumps(body).encode("utf-8")

@@ -324,6 +324,15 @@ def write_manifest(files: Sequence[SourceFile], out_dir: Path | str) -> str:
     return digest
 
 
+def read_manifest_digest(manifest: Path | str) -> str:
+    """Hash recorded next to ``manifest.parquet`` (fallback: hash of its bytes)."""
+    manifest = Path(manifest)
+    hash_file = manifest.parent / "manifest_hash"
+    if hash_file.is_file():
+        return hash_file.read_text(encoding="utf-8").strip()
+    return sha256_text(manifest.read_bytes().hex())
+
+
 def format_split_detail(files: Sequence[SourceFile]) -> str:
     """Repos and file counts per split, with repo names."""
     lines: list[str] = []

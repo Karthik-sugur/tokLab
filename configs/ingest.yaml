@@ -23,6 +23,24 @@ skip_file_names:
   - conftest.py
   - setup.py
 
+# Files the shared base tokenizer cannot round-trip. Excluded at ingest, so
+# they are absent for EVERY condition (C1..C6) and every split. The
+# round-trip check itself is unchanged. The Qwen2.5-Coder tokenizer applies
+# an NFC normalizer before encoding; these files contain text that is not
+# NFC, so decode(encode(x)) returns NFC(x) != x. Found with
+# scripts/diagnose_fidelity.py (C2, every split of data/processed/manifest).
+excluded_files:
+  - path: pydantic/tests/test_networks.py
+    reason: "NFC normalizer: U+F96E CJK compatibility ideograph -> U+8449 (base tokenizer, C2 fails)"
+  - path: black/tests/data/cases/docstring.py
+    reason: "NFC normalizer: U+2001 EM QUAD -> U+2003 EM SPACE (base tokenizer, C2 fails)"
+  - path: pytest/testing/io/test_terminalwriter.py
+    reason: "NFC normalizer: 'e' + U+0301 combining acute -> U+00E9 (base tokenizer, C2 fails)"
+  - path: aiohttp/tests/test_http_parser.py
+    reason: "NFC normalizer: U+212A KELVIN SIGN -> 'K' (base tokenizer, C2 fails)"
+  - path: aiohttp/tests/test_multipart_helpers.py
+    reason: "NFC normalizer: 'a' + U+0308 combining diaeresis -> U+00E4 (base tokenizer, C2 fails)"
+
 # Skip files smaller than this many bytes (1 = drop empty files such as
 # bare __init__.py; they add no tokens and make per-file ratios undefined).
 min_bytes: 1

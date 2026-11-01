@@ -12,6 +12,8 @@ class TokenizePreviewRequest(BaseModel):
     conditions: list[str] = Field(default_factory=lambda: ["C2", "C4", "C5"])
     model_name: str | None = None
     tokenizer_name: str | None = None
+    # Load this run's adapted vocabulary at K* for C3/C5.
+    experiment_id: str | None = None
 
 
 class SpanOut(BaseModel):
@@ -31,6 +33,10 @@ class TokenizePreviewResponse(BaseModel):
     n_chars: int
     n_bytes: int
     conditions: list[ConditionTokensOut]
+    experiment_id: str | None = None
+    k_star: int | None = None
+    vocab_sizes: dict[str, int] = Field(default_factory=dict)
+    note: str = ""
 
 
 class DatasetOut(BaseModel):

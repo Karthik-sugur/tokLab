@@ -28,32 +28,45 @@ def _is_ident_char(ch: str) -> bool:
     return ch.isalnum() or ch == "_"
 
 
+def _ident_run_end(text: str, pos: int, end: int) -> int:
+    while pos < end and _is_ident_char(text[pos]):
+        pos += 1
+    return pos
+
+
 def _join_native_identifiers(text: str, spans: list[tuple[int, int]]) -> list[str]:
-    """Join adjacent native pre-token spans that form a valid identifier."""
+    """Whole identifiers covered by adjacent native token spans.
+
+    A span may carry leading non-identifier characters (``" some"``,
+    ``".foo"``, ``"(Stark"``); they are skipped so the identifier starts at
+    its first identifier character. Only identifiers bounded by
+    non-identifier characters on both sides are returned, which is what C3's
+    longest-match encoder can match.
+    """
     out: list[str] = []
     i = 0
     n = len(spans)
     while i < n:
         start, end = spans[i]
-        if end <= start:
+        p = start
+        while p < end and not _is_ident_char(text[p]):
+            p += 1
+        if p >= end or (p > 0 and _is_ident_char(text[p - 1])):
             i += 1
             continue
-        first = text[start:end]
-        if not first or not (first[0].isalpha() or first[0] == "_"):
-            i += 1
-            continue
+        q = _ident_run_end(text, p, end)
         j = i
-        cur_end = end
-        while j + 1 < n and spans[j + 1][0] == cur_end:
-            nxt_end = spans[j + 1][1]
-            trial = text[start:nxt_end]
-            if trial and all(_is_ident_char(c) for c in trial):
-                j += 1
-                cur_end = nxt_end
-            else:
+        while q == spans[j][1] and j + 1 < n and spans[j + 1][0] == q:
+            nxt_start, nxt_end = spans[j + 1]
+            r = _ident_run_end(text, nxt_start, nxt_end)
+            if r == nxt_start:
                 break
-        candidate = text[start:cur_end]
-        if candidate.isidentifier():
+            j += 1
+            q = r
+        candidate = text[p:q]
+        if candidate.isidentifier() and not (
+            q < len(text) and _is_ident_char(text[q])
+        ):
             out.append(candidate)
         i = j + 1
     return out

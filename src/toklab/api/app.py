@@ -80,12 +80,38 @@ def create_app(
                 "too_large",
             )
         cfg: dict[str, Any] = {}
+        adapted = None
+        k_star = None
+        exp_id = (body.experiment_id or "").strip() or None
+        if exp_id is not None:
+            from toklab.experiments.runner import load_kstar_vocabs
+
+            run_dir = store.run_dir(exp_id)
+            run_cfg = store.read_json(exp_id, "config.json")
+            if run_cfg is None:
+                raise _http(404, f"experiment {exp_id} not found", "missing")
+            try:
+                k_star, adapted = load_kstar_vocabs(run_dir)
+            except FileNotFoundError as exc:
+                raise _http(409, str(exc), "no_vocab") from exc
+            model = run_cfg.get("model") or {}
+            if model.get("model_name"):
+                cfg["model_name"] = model["model_name"]
+            if model.get("tokenizer_name"):
+                cfg["tokenizer_name"] = model["tokenizer_name"]
         if body.model_name:
             cfg["model_name"] = body.model_name
         if body.tokenizer_name:
             cfg["tokenizer_name"] = body.tokenizer_name
         try:
-            raw = preview_tokenize(body.text, body.conditions, cfg=cfg or None)
+            raw = preview_tokenize(
+                body.text,
+                body.conditions,
+                cfg=cfg or None,
+                adapted=adapted,
+                experiment_id=exp_id,
+                k_star=k_star,
+            )
         except ValueError as exc:
             msg = str(exc)
             if "too large" in msg:

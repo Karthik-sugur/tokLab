@@ -13,17 +13,24 @@ model:
   head_dim: 64
 
 data:
-  repos_dir: data/repos
-  manifest_path: data/processed/manifest.parquet
-  synthetic_dir: data/synthetic
+  # Every stage (fidelity, intrinsic, context, mining, factorial, systems,
+  # drift) reads this corpus. The run fails if synth_manifest.parquet is
+  # missing or was built from a different manifest.
+  corpus:
+    kind: synthetic
+    dir: data/synthetic
+    manifest: data/processed/manifest.parquet
   eval_split: test
   # test = new codebase (held-out repos); test_inorg = new files in known
   # (adapt) codebases. See docs/decisions/004-inorg-eval.md.
   eval_splits: [test, test_inorg]
   adapt_split: adapt
+  # K* = argmin val tokens/KB for C3. See docs/decisions/005-k-selection.md.
+  k_selection_split: val
 
 vocab:
-  k_values: [0, 8]
+  # Capped at the number of positive-gain candidates.
+  k_values: [0, 256, 1024, 4096, 16384]
   min_freq: 1
   min_repos: 1
 
@@ -32,13 +39,17 @@ intrinsic:
   context_budgets: [64, 128, 256, 512]
   n_boot: 50
 
+# Separate pipeline step at K*: `toklab run systems --run <hash>`
+# (skip with SKIP_SYSTEMS=1 in scripts/run_real_pipeline.sh).
 systems:
-  enabled: false
-  conditions: [C2, C4]
-  seq_lens: [32, 64]
-  n_warmup: 5
-  n_repeats: 30
+  enabled: true
+  conditions: [C2, C3, C4, C5]
+  seq_lens: [512, 1024, 2048]
+  n_warmup: 2
+  n_repeats: 10
+  device: cpu
   dtype: float32
+  input_split: test
 
 stages:
   fidelity: true
@@ -46,7 +57,6 @@ stages:
   factorial: true
   context: true
   vocab_cost: true
-  systems: false
   report: true
 
 hypotheses_path: configs/hypotheses.yaml

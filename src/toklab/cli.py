@@ -119,7 +119,9 @@ def data_build(
     ]
     typer.echo(format_split_detail(assigned))
     typer.echo(f"manifest={(out / 'manifest.parquet').resolve()}")
-    typer.echo(f"manifest_hash={(out / 'manifest_hash').resolve()}")
+    digest = (out / "manifest_hash").read_text(encoding="utf-8").strip()
+    typer.echo(f"manifest_hash={digest}")
+    typer.echo(f"manifest_hash_file={(out / 'manifest_hash').resolve()}")
 
 
 @data_app.command("synth")
@@ -175,7 +177,8 @@ def data_synth(
         f"val_files={summary['val_files']} "
         f"test_files={summary['test_files']} "
         f"drift_holdout_files={summary['drift_holdout_files']} "
-        f"seed={summary['seed']}"
+        f"seed={summary['seed']} "
+        f"manifest_hash={summary['manifest_hash']}"
     )
     for key, v in summary["variants"].items():
         typer.echo(
@@ -288,6 +291,7 @@ def run_experiment_cmd(
     status = run_experiment(config)
     typer.echo(f"config_hash={status['config_hash']}")
     typer.echo(f"run_dir={status.get('run_dir')}")
+    typer.echo(f"k_star={status.get('k_star')}")
     typer.echo(f"state={status.get('state')}")
     if status.get("report_path"):
         typer.echo(f"report={status['report_path']}")
@@ -327,6 +331,26 @@ def run_drift_cmd(
     typer.echo(table)
     typer.echo(f"run_dir={run_dir.resolve()}")
     typer.echo(f"drift_table={(run_dir / 'drift_table.txt').resolve()}")
+    typer.echo(f"report={(run_dir / 'report.md').resolve()}")
+
+
+@run_app.command("systems")
+def run_systems_cmd(
+    run: Annotated[
+        str,
+        typer.Option("--run", help="Experiment config hash under runs/"),
+    ],
+    runs_root: Annotated[
+        Path,
+        typer.Option("--runs-root", help="Runs root directory"),
+    ] = Path("runs"),
+) -> None:
+    """Systems latency benchmark (C2–C5 at the run's K*); needs torch."""
+    from toklab.evaluation.systems import run_systems_for_experiment_hash
+
+    df, run_dir = run_systems_for_experiment_hash(run, runs_root=runs_root)
+    typer.echo(f"systems_rows={len(df)}")
+    typer.echo(f"systems={(run_dir / 'systems.parquet').resolve()}")
     typer.echo(f"report={(run_dir / 'report.md').resolve()}")
 
 

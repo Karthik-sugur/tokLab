@@ -2,7 +2,9 @@
 
 For each drift proportion ``p ∈ {0, 10, 25, 50}``:
 
-1. Build drifted ``drift_holdout`` texts via ``data.synth.drift.apply_drift``.
+1. Read the drifted ``drift_holdout`` texts: the pre-generated
+   ``<synthetic>/drift/p<P>`` files for a synthetic corpus, otherwise
+   ``data.synth.drift.apply_drift`` in memory on the original files.
 2. Assert every new drift identifier is absent from the adapt corpus.
 3. Tokenize with baselines (C2, C4), STATIC (frozen adapt vocab), and
    REFRESH (append-only new entries from a small v1 sample; old ids fixed).
@@ -22,6 +24,7 @@ import pandas as pd
 
 from toklab.core.source_io import read_source_text
 from toklab.core.types import SourceFile
+from toklab.data.corpus import Corpus
 from toklab.data.splits import ManifestView
 from toklab.data.synth.drift import DRIFT_PROPORTIONS, apply_drift
 from toklab.data.synth.lexicon import EnterpriseLexicon
@@ -93,14 +96,13 @@ def adapted_coverage(
     if not adapted_ids:
         return 0.0, 0, len(idents)
     enc = tokenizer.encode(text)
+    span_ids: dict[tuple[int, int], list[int]] = {}
+    for tid, span in zip(enc.ids, enc.spans, strict=True):
+        span_ids.setdefault(span, []).append(tid)
     hits = 0
     for start, end, _name in idents:
-        matched = [
-            i
-            for i, (s, e) in enumerate(enc.spans)
-            if s == start and e == end
-        ]
-        if len(matched) == 1 and enc.ids[matched[0]] in adapted_ids:
+        matched = span_ids.get((start, end), [])
+        if len(matched) == 1 and matched[0] in adapted_ids:
             hits += 1
     return hits / len(idents), hits, len(idents)
 
@@ -259,10 +261,30 @@ def build_drift_texts(
     return texts, new_names, maps
 
 
+def load_pregenerated_drift(
+    corpus: Corpus,
+    drift_files: Sequence[SourceFile],
+    proportion: int,
+) -> tuple[dict[str, str], set[str]]:
+    """Drift texts and new names written by ``toklab data synth``."""
+    root = corpus.drift_root(proportion)
+    texts = {
+        sf.file_id: read_source_text(root / sf.repo / sf.path) for sf in drift_files
+    }
+    maps_path = corpus.root / "rename_map.json"
+    maps = json.loads(maps_path.read_text(encoding="utf-8")).get("drift", {})
+    per_file = maps.get(str(proportion), {})
+    new_names: set[str] = set()
+    for sf in drift_files:
+        new_names.update((per_file.get(f"{sf.repo}/{sf.path}") or {}).values())
+    return texts, new_names
+
+
 def run_drift(
     *,
     manifest: Path | str,
-    repos_dir: Path | str,
+    repos_dir: Path | str | None = None,
+    corpus: Corpus | None = None,
     out_dir: Path | str | None = None,
     seed: int = 0,
     k_static: int = 8,
@@ -272,14 +294,29 @@ def run_drift(
     cfg: dict[str, Any] | None = None,
     gate_valid_finetuned: Mapping[str, bool] | None = None,
     bpb_fn: Any | None = None,
+    min_freq: int = 1,
+    min_repos: int = 1,
+    static_vocabs: Mapping[str, AdaptedVocab] | None = None,
 ) -> tuple[str, pd.DataFrame, list[DriftRow]]:
     """Run the full drift sweep; optionally write parquet/table under ``out_dir``.
+
+    With a synthetic ``corpus`` the adapt texts come from ``<dir>/adapt`` and
+    the drifted holdout texts are the pre-generated ``<dir>/drift/p<P>``
+    files (new names from ``rename_map.json``). Otherwise (original corpus,
+    or only ``repos_dir``) drift is applied in memory to the original files.
+
+    ``static_vocabs`` (``{"native": ..., "structural": ...}``) reuses an
+    experiment's K* vocabularies instead of re-mining at ``k_static``.
 
     ``gate_valid_finetuned`` maps variant name → whether BPB is allowed.
     When absent or false, ``bpb`` is left ``None`` with status ``not run``.
     """
-    repos_dir = Path(repos_dir)
     manifest = Path(manifest)
+    if corpus is None:
+        if repos_dir is None:
+            raise ValueError("run_drift needs corpus= or repos_dir=")
+        corpus = Corpus(kind="original", root=Path(repos_dir), manifest=manifest)
+    adapt_root = corpus.split_root("adapt")
     cfg = dict(cfg or {})
     try:
         cfg = {**load_base_model_config(cfg.get("base_model_yaml")), **cfg}
@@ -296,7 +333,7 @@ def run_drift(
         raise ValueError("no files in drift_holdout split")
 
     adapt_texts = {
-        sf.file_id: read_source_text(repos_dir / sf.repo / sf.path)
+        sf.file_id: read_source_text(adapt_root / sf.repo / sf.path)
         for sf in adapt_files
     }
     adapt_idents = adapt_corpus_identifiers(adapt_files, adapt_texts)
@@ -310,26 +347,29 @@ def run_drift(
         "base_tokenizer": base,
         "attach_leading_space": True,
     }
-    vocab_n = build_adapted_vocab(
-        adapt_view,
-        repos_dir=repos_dir,
-        base=base,
-        mode="native",
-        k=k_static,
-        min_freq=1,
-        min_repos=1,
-        base_model=str(cfg.get("model_name", "")),
-    )
-    vocab_s = build_adapted_vocab(
-        adapt_view,
-        repos_dir=repos_dir,
-        base=base,
-        mode="structural",
-        k=k_static,
-        min_freq=1,
-        min_repos=1,
-        base_model=str(cfg.get("model_name", "")),
-    )
+    if static_vocabs is not None:
+        vocab_n = static_vocabs["native"]
+        vocab_s = static_vocabs["structural"]
+        for v in (vocab_n, vocab_s):
+            if v.id_offset != base.vocab_size:
+                raise ValueError(
+                    f"static vocab id_offset {v.id_offset} != base vocab size "
+                    f"{base.vocab_size}"
+                )
+    else:
+        vocab_n, vocab_s = (
+            build_adapted_vocab(
+                adapt_view,
+                repos_dir=adapt_root,
+                base=base,
+                mode=mode,
+                k=k_static,
+                min_freq=min_freq,
+                min_repos=min_repos,
+                base_model=str(cfg.get("model_name", "")),
+            )
+            for mode in ("native", "structural")
+        )
 
     lexicon = EnterpriseLexicon.from_yaml(seed=seed)
     gate_map = dict(gate_valid_finetuned or {})
@@ -338,13 +378,18 @@ def run_drift(
     for p in proportions:
         if p not in DRIFT_PROPORTIONS:
             raise ValueError(f"unsupported proportion {p}")
-        drift_texts, new_names, _maps = build_drift_texts(
-            drift_files=drift_files,
-            repos_dir=repos_dir,
-            lexicon=lexicon,
-            proportion=p,
-            seed=seed,
-        )
+        if corpus.is_synthetic:
+            drift_texts, new_names = load_pregenerated_drift(corpus, drift_files, p)
+        else:
+            drift_texts, new_names, _maps = build_drift_texts(
+                drift_files=drift_files,
+                repos_dir=corpus.root,
+                lexicon=lexicon,
+                proportion=p,
+                seed=seed,
+            )
+        if p == 0 and new_names:
+            raise AssertionError("p=0 drift variant must not rename identifiers")
         assert_drift_names_unseen(new_names, adapt_idents)
 
         ordered_ids = [sf.file_id for sf in drift_files]
@@ -445,8 +490,18 @@ def run_drift(
         (out / "drift_meta.json").write_text(
             json.dumps(
                 {
+                    "corpus_kind": corpus.kind,
+                    "drift_texts": (
+                        "pre-generated (synthetic drift/p<P>)"
+                        if corpus.is_synthetic
+                        else "renamed in memory (apply_drift)"
+                    ),
                     "proportions": list(proportions),
                     "k_static": k_static,
+                    "static_vocab_sizes": {
+                        "native": len(vocab_n),
+                        "structural": len(vocab_s),
+                    },
                     "k_refresh": k_refresh,
                     "v1_sample_size": v1_sample_size,
                     "seed": seed,
@@ -470,8 +525,14 @@ def run_drift_for_experiment_hash(
     k_refresh: int = 4,
     v1_sample_size: int = 1,
 ) -> tuple[str, Path]:
-    """Load ``runs/<hash>/config.json``, run drift, re-render report."""
+    """Load ``runs/<hash>/config.json``, run drift at K*, re-render report.
+
+    STATIC uses the experiment's saved K* vocabularies (``k_selection.json``).
+    ``k_static`` overrides that by re-mining at the given K.
+    """
     from toklab.evaluation.report import render_report
+    from toklab.experiments.config import ExperimentConfig
+    from toklab.experiments.runner import load_kstar_vocabs, open_experiment_corpus
 
     runs_root = Path(runs_root)
     run_dir = runs_root / config_hash
@@ -479,29 +540,32 @@ def run_drift_for_experiment_hash(
     if not cfg_path.is_file():
         raise FileNotFoundError(f"no config.json in {run_dir}")
     cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
-    data = cfg.get("data", {})
-    vocab_cfg = cfg.get("vocab", {})
-    model = cfg.get("model", {})
-    k = k_static
-    if k is None:
-        ks = vocab_cfg.get("k_values") or [8]
-        k = max(int(x) for x in ks)
+    config = ExperimentConfig.model_validate(cfg)
+    corpus = open_experiment_corpus(config)
+
+    static_vocabs: dict[str, AdaptedVocab] | None = None
+    if k_static is None:
+        k, static_vocabs = load_kstar_vocabs(run_dir)
+    else:
+        k = int(k_static)
 
     model_cfg = {
-        "model_name": model.get("model_name", "Qwen/Qwen2.5-Coder-0.5B"),
-        "tokenizer_name": model.get("tokenizer_name")
-        or model.get("model_name"),
+        "model_name": config.model.model_name,
+        "tokenizer_name": config.model.tokenizer_name or config.model.model_name,
     }
     table, _df, _rows = run_drift(
-        manifest=data["manifest_path"],
-        repos_dir=data["repos_dir"],
+        manifest=corpus.manifest,
+        corpus=corpus,
         out_dir=run_dir,
-        seed=int(cfg.get("seed", 0)),
-        k_static=int(k),
+        seed=config.seed,
+        k_static=k,
         k_refresh=k_refresh,
         v1_sample_size=v1_sample_size,
         cfg=model_cfg,
         gate_valid_finetuned={},  # no fine-tune in default path → BPB not run
+        min_freq=config.vocab.min_freq,
+        min_repos=config.vocab.min_repos,
+        static_vocabs=static_vocabs,
     )
     hypo = cfg.get("hypotheses_path", "configs/hypotheses.yaml")
     render_report(run_dir=run_dir, hypotheses_path=Path(hypo))

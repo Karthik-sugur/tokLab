@@ -79,6 +79,33 @@ def load_ingest_config(path: Path | str | None = None) -> dict[str, Any]:
         if not isinstance(mins, dict):
             raise ValueError(f"{cfg_path}: min_repos_per_split must be a mapping")
         out["min_repos_per_split"] = {str(k): int(v) for k, v in mins.items()}
+    out["excluded_files"] = _parse_excluded_files(
+        data.get("excluded_files"), cfg_path
+    )
+    return out
+
+
+def _parse_excluded_files(raw: Any, cfg_path: Path) -> dict[str, str]:
+    """``excluded_files`` entries → ``{"repo/rel/path.py": reason}``."""
+    if raw is None:
+        return {}
+    if not isinstance(raw, list):
+        raise ValueError(f"{cfg_path}: excluded_files must be a list")
+    out: dict[str, str] = {}
+    for entry in raw:
+        if not isinstance(entry, dict):
+            raise ValueError(
+                f"{cfg_path}: excluded_files entries need 'path' and 'reason'"
+            )
+        path = str(entry.get("path") or "").strip()
+        reason = str(entry.get("reason") or "").strip()
+        if not path or not reason:
+            raise ValueError(
+                f"{cfg_path}: excluded_files entries need 'path' and 'reason'"
+            )
+        if path in out:
+            raise ValueError(f"{cfg_path}: duplicate excluded_files path {path}")
+        out[path] = reason
     return out
 
 
@@ -123,8 +150,9 @@ def ingest_repos(
     Each immediate child directory of ``repos_dir`` is treated as one
     repository. Originals are never modified. Files are skipped when they
     exceed 1 MiB, are smaller than ``min_bytes``, are not valid UTF-8,
-    match skip lists in ``configs/ingest.yaml``, or carry generated-file
-    markers.
+    match skip lists or ``excluded_files`` in ``configs/ingest.yaml``, or
+    carry generated-file markers. Exclusions apply before splitting, so every
+    condition sees the same files.
     """
     root = Path(repos_dir)
     if not root.is_dir():
@@ -134,6 +162,7 @@ def ingest_repos(
     skip_dirs: frozenset[str] = cfg["skip_dir_names"]
     skip_files: frozenset[str] = cfg["skip_file_names"]
     min_bytes: int = cfg["min_bytes"]
+    excluded: dict[str, str] = cfg["excluded_files"]
 
     repo_dirs = sorted(
         p for p in root.iterdir() if p.is_dir() and not p.name.startswith(".")
@@ -147,6 +176,8 @@ def ingest_repos(
             if _is_skipped_path(
                 rel, skip_dir_names=skip_dirs, skip_file_names=skip_files
             ):
+                continue
+            if f"{repo}/{rel.as_posix()}" in excluded:
                 continue
             if path.stat().st_size > MAX_FILE_BYTES:
                 continue

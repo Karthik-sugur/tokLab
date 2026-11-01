@@ -54,17 +54,37 @@ def _sorted_entries(adapted: dict[str, int]) -> list[str]:
     return sorted(adapted.keys(), key=lambda s: (-len(s), s))
 
 
+def _is_ident_char(ch: str) -> bool:
+    return ch.isalnum() or ch == "_"
+
+
+def entries_are_plain_identifiers(adapted: dict[str, int]) -> bool:
+    """True if every entry consists only of ``isalnum()`` / ``_`` characters."""
+    return all(all(_is_ident_char(c) for c in ent) for ent in adapted)
+
+
 def encode_native_longest_match(
     text: str,
     base: NativeHFTokenizer,
     adapted: dict[str, int],
+    *,
+    plain_identifiers: bool | None = None,
 ) -> EncodeResult:
     """C3 encode: longest-match adapted ids on identifier boundaries; else base BPE.
 
     With an empty adapted map this is exactly ``base.encode(text)`` (≡ C2).
+
+    When every entry is made of identifier characters only, a match must
+    start and end on identifier boundaries, so the only entry that can match
+    at a boundary is the whole identifier run there: one dict lookup per run
+    gives the same result as scanning all entries.
     """
     if not adapted:
         return base.encode(text)
+    if plain_identifiers is None:
+        plain_identifiers = entries_are_plain_identifiers(adapted)
+    if plain_identifiers:
+        return _encode_runs(text, base, adapted)
     entries = _sorted_entries(adapted)
     ids: list[int] = []
     spans: list[tuple[int, int]] = []
@@ -102,6 +122,46 @@ def encode_native_longest_match(
             unmatched_start = i
         i += 1
     flush_unmatched(len(text))
+    return EncodeResult(ids=ids, spans=spans)
+
+
+def _encode_runs(
+    text: str, base: NativeHFTokenizer, adapted: dict[str, int]
+) -> EncodeResult:
+    ids: list[int] = []
+    spans: list[tuple[int, int]] = []
+    n = len(text)
+    i = 0
+    unmatched_start: int | None = None
+
+    def flush_unmatched(up_to: int) -> None:
+        nonlocal unmatched_start
+        if unmatched_start is not None and unmatched_start < up_to:
+            sub = base.encode(text[unmatched_start:up_to])
+            for tid, (s, e) in zip(sub.ids, sub.spans, strict=True):
+                ids.append(tid)
+                spans.append((unmatched_start + s, unmatched_start + e))
+        unmatched_start = None
+
+    while i < n:
+        if _is_ident_char(text[i]) and (i == 0 or not _is_ident_char(text[i - 1])):
+            j = i + 1
+            while j < n and _is_ident_char(text[j]):
+                j += 1
+            piece = text[i:j]
+            tid = adapted.get(piece)
+            if tid is not None and piece.isidentifier():
+                flush_unmatched(i)
+                ids.append(tid)
+                spans.append((i, j))
+            elif unmatched_start is None:
+                unmatched_start = i
+            i = j
+            continue
+        if unmatched_start is None:
+            unmatched_start = i
+        i += 1
+    flush_unmatched(n)
     return EncodeResult(ids=ids, spans=spans)
 
 
@@ -156,6 +216,7 @@ class ComposedTokenizer:
             self._adapted_obj = None
             self.adapted_vocab = dict(adapted_vocab)
         self._rev = {i: t for t, i in self.adapted_vocab.items()}
+        self._plain_identifiers = entries_are_plain_identifiers(self.adapted_vocab)
 
     def _segments(self, text: str) -> list[Segment]:
         segs = self.segmenter.segment(text)
@@ -185,7 +246,12 @@ class ComposedTokenizer:
             return EncodeResult(ids=[], spans=[])
 
         if self.match_mode == "native_longest":
-            return encode_native_longest_match(text, self.base, self.adapted_vocab)
+            return encode_native_longest_match(
+                text,
+                self.base,
+                self.adapted_vocab,
+                plain_identifiers=self._plain_identifiers,
+            )
 
         # C4 / C5: segment then encode.
         ids: list[int] = []

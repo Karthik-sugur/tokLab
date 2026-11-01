@@ -367,3 +367,93 @@ def test_schema_experiment_status(
         "stages",
         "run_dir",
     }
+
+
+PREVIEW_IDENT = "AcmeLedgerReconciliationService"
+PREVIEW_TEXT = f"x = {PREVIEW_IDENT}()\n"
+
+
+def _run_with_kstar_vocab(client: TestClient, exp_id: str, k_star: int) -> int:
+    """Write config.json + K* vocab files as the runner does; return the id."""
+    from toklab.tokenizers.registry import get_tokenizer
+    from toklab.vocab.adapted_vocab import AdaptedEntry, AdaptedVocab
+
+    store: RunStore = client.app.state.store
+    store.write_json(
+        exp_id,
+        "config.json",
+        {"name": "preview", "model": {"model_name": "Qwen/Qwen2.5-Coder-0.5B"}},
+    )
+    offset = get_tokenizer("C2", {}).vocab_size
+    for mode in ("native", "structural"):
+        AdaptedVocab(
+            id_offset=offset,
+            entries=[AdaptedEntry(PREVIEW_IDENT, offset, 9.0, 3, 2)],
+            mode=mode,
+        ).save(store.run_dir(exp_id) / "vocab" / f"{mode}_k{k_star}.json")
+    store.write_json(
+        exp_id,
+        "k_selection.json",
+        {
+            "k_star": k_star,
+            "vocab_files": {
+                m: f"vocab/{m}_k{k_star}.json" for m in ("native", "structural")
+            },
+        },
+    )
+    return offset
+
+
+def test_preview_with_experiment_loads_kstar_vocab(client: TestClient) -> None:
+    offset = _run_with_kstar_vocab(client, "exp_with_vocab", k_star=256)
+    r = client.post(
+        "/tokenize/preview",
+        json={
+            "text": PREVIEW_TEXT,
+            "conditions": ["C2", "C3", "C4", "C5"],
+            "experiment_id": "exp_with_vocab",
+        },
+    )
+    assert r.status_code == 200, r.text
+    data = r.json()
+    by = {c["condition"]: c for c in data["conditions"]}
+    assert data["experiment_id"] == "exp_with_vocab"
+    assert data["k_star"] == 256
+    assert data["vocab_sizes"] == {"native": 1, "structural": 1}
+    assert "K*=256" in data["note"]
+    for cond, baseline in (("C3", "C2"), ("C5", "C4")):
+        assert offset in by[cond]["ids"]
+        assert offset not in by[baseline]["ids"]
+        assert by[cond]["n_tokens"] < by[baseline]["n_tokens"]
+
+
+def test_preview_without_experiment_notes_no_vocab(client: TestClient) -> None:
+    from toklab.experiments.preview import NO_VOCAB_NOTE
+
+    r = client.post(
+        "/tokenize/preview",
+        json={"text": PREVIEW_TEXT, "conditions": ["C2", "C3", "C4", "C5"]},
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert data["note"] == NO_VOCAB_NOTE
+    assert data["note"] == "no adapted vocabulary loaded, so C3/C5 equal C2/C4"
+    assert data["experiment_id"] is None and data["k_star"] is None
+    by = {c["condition"]: c for c in data["conditions"]}
+    assert by["C3"]["ids"] == by["C2"]["ids"]
+    assert by["C5"]["ids"] == by["C4"]["ids"]
+
+
+def test_preview_unknown_experiment_404_and_no_vocab_409(client: TestClient) -> None:
+    r = client.post(
+        "/tokenize/preview",
+        json={"text": "x\n", "conditions": ["C3"], "experiment_id": "nope"},
+    )
+    assert r.status_code == 404
+    store: RunStore = client.app.state.store
+    store.write_json("no_vocab_run", "config.json", {"name": "x", "model": {}})
+    r = client.post(
+        "/tokenize/preview",
+        json={"text": "x\n", "conditions": ["C3"], "experiment_id": "no_vocab_run"},
+    )
+    assert r.status_code == 409

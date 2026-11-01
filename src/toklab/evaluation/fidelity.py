@@ -87,6 +87,55 @@ def check_roundtrip(
     return report
 
 
+def roundtrip_with_counts(
+    tokenizer: Tokenizer,
+    files: Sequence[SourceFile],
+    texts: dict[str, str],
+    *,
+    orig_parses: dict[str, bool] | None = None,
+) -> tuple[FidelityReport, dict[str, int]]:
+    """``check_roundtrip`` plus token count per file, encoding each file once.
+
+    Same check as :func:`check_roundtrip` (``decode(encode(x)) == x``). When
+    the round trip is exact the decoded text *is* the original, so it re-parses
+    exactly when the original parses; ``orig_parses`` (file_id → parses) lets
+    callers compute that once per file instead of once per tokenizer.
+    """
+    report = FidelityReport(tokenizer_name=tokenizer.name)
+    counts: dict[str, int] = {}
+    for sf in files:
+        report.n_files += 1
+        text = texts[sf.file_id]
+        encoded = tokenizer.encode(text)
+        counts[sf.file_id] = len(encoded.ids)
+        decoded = tokenizer.decode(encoded.ids)
+        if decoded != text:
+            report.n_roundtrip_fail += 1
+            report.failures.append(
+                f"roundtrip:{sf.file_id}:{sf.repo}/{sf.path} "
+                f"len_in={len(text)} len_out={len(decoded)}"
+            )
+            continue
+        report.n_roundtrip_ok += 1
+        parses = (
+            orig_parses[sf.file_id]
+            if orig_parses is not None and sf.file_id in orig_parses
+            else source_parses(text)
+        )
+        if parses:
+            report.n_orig_parsed += 1
+            report.n_reparse_ok += 1
+    return report, counts
+
+
+def source_parses(text: str) -> bool:
+    try:
+        ast.parse(text)
+    except SyntaxError:
+        return False
+    return True
+
+
 def check_roundtrip_text(tokenizer: Tokenizer, texts: Iterable[str]) -> list[str]:
     """Return failure messages for any text that does not round-trip."""
     failures: list[str] = []

@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class ModelConfig(BaseModel):
@@ -19,15 +19,50 @@ class ModelConfig(BaseModel):
     head_dim: int = 64
 
 
+class CorpusConfig(BaseModel):
+    """Source text read by every stage: ``original`` repos or ``synthetic``."""
+
+    kind: Literal["original", "synthetic"]
+    dir: Path
+    manifest: Path
+
+
 class DataConfig(BaseModel):
-    repos_dir: Path
-    manifest_path: Path
+    # Either ``corpus`` or (legacy) ``repos_dir`` + ``manifest_path``.
+    corpus: CorpusConfig | None = None
+    repos_dir: Path | None = None
+    manifest_path: Path | None = None
     synthetic_dir: Path | None = None
     # Primary evaluation set (hypothesis verdicts use it first).
     eval_split: str = "test"
     # All evaluation sets reported; defaults to ``[eval_split]``.
     eval_splits: list[str] | None = None
     adapt_split: str = "adapt"
+    # Split used to choose K* (docs/decisions/005-k-selection.md).
+    k_selection_split: str = "val"
+
+    @model_validator(mode="after")
+    def _check_source(self) -> DataConfig:
+        if self.corpus is None and (
+            self.repos_dir is None or self.manifest_path is None
+        ):
+            raise ValueError(
+                "data needs corpus: {kind, dir, manifest} "
+                "(or legacy repos_dir + manifest_path)"
+            )
+        if self.k_selection_split in {self.adapt_split, *self.resolved_eval_splits()}:
+            raise ValueError(
+                "k_selection_split must differ from adapt and evaluation splits"
+            )
+        return self
+
+    def resolved_corpus(self) -> CorpusConfig:
+        if self.corpus is not None:
+            return self.corpus
+        assert self.repos_dir is not None and self.manifest_path is not None
+        return CorpusConfig(
+            kind="original", dir=self.repos_dir, manifest=self.manifest_path
+        )
 
     def resolved_eval_splits(self) -> list[str]:
         splits = list(self.eval_splits or [self.eval_split])
@@ -39,9 +74,17 @@ class DataConfig(BaseModel):
 
 
 class VocabConfig(BaseModel):
+    # Nominal sweep; values above the number of positive-gain candidates are
+    # capped (see runner.effective_k_values).
     k_values: list[int] = Field(default_factory=lambda: [0, 128])
     min_freq: int = 1
     min_repos: int = 1
+
+    @model_validator(mode="after")
+    def _check_k(self) -> VocabConfig:
+        if not self.k_values or any(k < 0 for k in self.k_values):
+            raise ValueError("vocab.k_values must be a non-empty list of K >= 0")
+        return self
 
 
 class IntrinsicConfig(BaseModel):
@@ -55,6 +98,8 @@ class IntrinsicConfig(BaseModel):
 
 
 class SystemsConfig(BaseModel):
+    """Latency benchmark; runs as its own step (``toklab run systems``) at K*."""
+
     enabled: bool = False
     conditions: list[str] = Field(default_factory=lambda: ["C2", "C4"])
     seq_lens: list[int] = Field(default_factory=lambda: [64, 128])
@@ -62,6 +107,8 @@ class SystemsConfig(BaseModel):
     n_repeats: int = 30
     dtype: str = "float32"
     device: str | None = None
+    # Eval split whose token streams feed the model (real inputs, not random).
+    input_split: str = "test"
 
 
 class StagesConfig(BaseModel):
@@ -70,6 +117,8 @@ class StagesConfig(BaseModel):
     factorial: bool = True
     context: bool = True
     vocab_cost: bool = True
+    # Unused by the runner: systems is the separate `toklab run systems` step
+    # gated by ``systems.enabled``. Kept so older configs still validate.
     systems: bool = False
     report: bool = True
 
